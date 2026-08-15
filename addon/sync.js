@@ -44,6 +44,7 @@ var BilingualSync = {
             "extensions.zotero.pdf2zh.dual": true,
             "extensions.zotero.pdf2zh.dualMode": "LR",
             "extensions.zotero.pdf2zh.dual-open": true,
+            "extensions.zotero.pdf2zh.disableRichTextTranslate": true,
         };
         for (const [key, value] of Object.entries(preferences)) {
             Zotero.Prefs.set(key, value, true);
@@ -125,11 +126,12 @@ var BilingualSync = {
             state: "resident-page-cache-ready",
             cacheUpdatedAt: new Date().toISOString(),
             attachment: cache.attachment,
-            cachedPages: [...cache.protected.keys()],
-            cachedPageCount: cache.protected.size,
+            cachedPages: [...cache.retained.keys()],
+            cachedPageCount: cache.retained.size,
             cacheLimit: cache.limit,
             documentPages: cache.viewer.pagesCount,
             preventedEvictions: cache.preventedEvictions,
+            preventedResets: cache.preventedResets,
             explicitEvictions: cache.explicitEvictions,
             residentCacheSmokePassed: cache.smokePassed,
             residentCacheSmokePage: cache.smokePage,
@@ -153,25 +155,33 @@ var BilingualSync = {
             pdfDocument: viewer.pdfDocument,
             attachment: pdfPath.replace(/^.*[\\/]/, ""),
             limit: Math.min(this.residentPageLimit(), viewer.pagesCount),
+            retained: new Map(),
             protected: new Map(),
             wrapped: [],
             removeViewerListeners: [],
             preventedEvictions: 0,
+            preventedResets: 0,
             explicitEvictions: 0,
             lastStatusAt: 0,
+            win,
         };
 
         for (const pageView of viewer._pages) {
-            if (!pageView || typeof pageView.destroy !== "function") continue;
+            if (
+                !pageView
+                || typeof pageView.destroy !== "function"
+                || typeof pageView.reset !== "function"
+            ) continue;
             const originalDestroy = pageView.destroy;
+            const originalReset = pageView.reset;
             const wrappedDestroy = function (...args) {
                 if (
                     cache.enabled
                     && viewer.pdfDocument === cache.pdfDocument
-                    && cache.protected.has(this.id)
+                    && cache.retained.has(this.id)
                 ) {
                     if (cache.smokeMode) {
-                        cache.smokeIntercepted = true;
+                        cache.smokeDestroyIntercepted = true;
                     }
                     else {
                         cache.preventedEvictions += 1;
@@ -181,36 +191,100 @@ var BilingualSync = {
                 }
                 return originalDestroy.apply(this, args);
             };
+            const wrappedReset = function (...args) {
+                const emptyReset = args.length === 0
+                    || (
+                        args.length === 1
+                        && args[0]
+                        && typeof args[0] === "object"
+                        && Object.keys(args[0]).length === 0
+                    );
+                if (
+                    cache.enabled
+                    && !cache.bypassReset
+                    && emptyReset
+                    && viewer.pdfDocument === cache.pdfDocument
+                    && cache.retained.has(this.id)
+                ) {
+                    if (cache.smokeMode) cache.smokeResetIntercepted = true;
+                    else {
+                        cache.preventedResets += 1;
+                        controller.reportResidentPageCache(cache);
+                    }
+                    return;
+                }
+                return originalReset.apply(this, args);
+            };
             pageView.destroy = wrappedDestroy;
-            cache.wrapped.push({ pageView, originalDestroy, wrappedDestroy });
+            pageView.reset = wrappedReset;
+            cache.wrapped.push({
+                pageView,
+                originalDestroy,
+                wrappedDestroy,
+                originalReset,
+                wrappedReset,
+            });
         }
+
+        cache.markRetained = (pageNumber) => {
+            if (!cache.enabled) return;
+            const pageView = viewer.getPageView(Number(pageNumber) - 1);
+            if (!pageView) return;
+            const hasRenderedSurface = pageView.renderingState !== 0
+                || pageView.div?.hasAttribute?.("data-loaded")
+                || pageView.div?.querySelector?.("canvas");
+            if (!hasRenderedSurface) return;
+            cache.retained.delete(pageView.id);
+            cache.retained.set(pageView.id, pageView);
+            while (cache.retained.size > cache.limit) {
+                const oldest = cache.retained.entries().next().value;
+                if (!oldest) break;
+                const [oldestID, oldestView] = oldest;
+                cache.retained.delete(oldestID);
+                cache.protected.delete(oldestID);
+                const wrapped = cache.wrapped.find(entry => entry.pageView === oldestView);
+                cache.bypassReset = true;
+                try {
+                    wrapped?.originalDestroy.call(oldestView);
+                }
+                finally {
+                    cache.bypassReset = false;
+                }
+                cache.explicitEvictions += 1;
+            }
+        };
 
         cache.touch = (pageNumber) => {
             if (!cache.enabled) return;
             const pageView = viewer.getPageView(Number(pageNumber) - 1);
             if (!pageView) return;
-            const rendered = pageView.renderingState === 3
-                || pageView.div?.hasAttribute?.("data-loaded")
-                || pageView.div?.querySelector?.("canvas");
-            if (!rendered) return;
+            if (pageView.renderingState !== 3) return;
+            cache.markRetained(pageNumber);
             cache.protected.delete(pageView.id);
             cache.protected.set(pageView.id, pageView);
-            while (cache.protected.size > cache.limit) {
-                const oldest = cache.protected.entries().next().value;
-                if (!oldest) break;
-                const [oldestID, oldestView] = oldest;
-                cache.protected.delete(oldestID);
-                const wrapped = cache.wrapped.find(entry => entry.pageView === oldestView);
-                wrapped?.originalDestroy.call(oldestView);
-                cache.explicitEvictions += 1;
-            }
         };
 
-        for (const pageView of viewer._pages) cache.touch(pageView.id);
-        const onPageRendered = event => cache.touch(event.pageNumber);
-        const onPageChanging = event => cache.touch(event.pageNumber);
+        for (const pageView of viewer._pages) {
+            cache.markRetained(pageView.id);
+            cache.touch(pageView.id);
+        }
+        const runSmokeWhenReady = () => {
+            if (!cache.smokeTested && controller.runResidentPageCacheSmokeTest(cache)) {
+                controller.reportResidentPageCache(cache, true);
+            }
+        };
+        const onPageRender = event => {
+            cache.markRetained(event.pageNumber);
+            runSmokeWhenReady();
+        };
+        const onPageRendered = event => {
+            cache.touch(event.pageNumber);
+            runSmokeWhenReady();
+        };
+        const onPageChanging = event => cache.markRetained(event.pageNumber);
         const onPagesDestroy = () => controller.releaseResidentPageCache(win);
         cache.removeViewerListeners.push(
+            this.listenToViewer(viewer.eventBus, "pagerender", onPageRender),
             this.listenToViewer(viewer.eventBus, "pagerendered", onPageRendered),
             this.listenToViewer(viewer.eventBus, "pagechanging", onPageChanging),
             this.listenToViewer(viewer.eventBus, "pagesdestroy", onPagesDestroy),
@@ -221,8 +295,9 @@ var BilingualSync = {
             attachment: cache.attachment,
             limit: cache.limit,
             documentPages: viewer.pagesCount,
-            cachedPages: [...cache.protected.keys()],
+            cachedPages: [...cache.retained.keys()],
             preventedEvictions: cache.preventedEvictions,
+            preventedResets: cache.preventedResets,
             explicitEvictions: cache.explicitEvictions,
         });
         state.residentCache = cache;
@@ -236,19 +311,22 @@ var BilingualSync = {
 
     runResidentPageCacheSmokeTest(cache) {
         if (cache.smokeTested) return cache.smokePassed;
-        cache.smokeTested = true;
         const pageView = cache.protected.values().next().value;
         if (!pageView) return false;
+        cache.smokeTested = true;
         const beforeState = pageView.renderingState;
         const beforeChildren = pageView.div?.childElementCount;
         const beforeCanvas = pageView.div?.querySelector?.("canvas") || null;
         cache.smokeMode = true;
-        cache.smokeIntercepted = false;
+        cache.smokeResetIntercepted = false;
+        cache.smokeDestroyIntercepted = false;
+        pageView.reset();
         pageView.destroy();
         cache.smokeMode = false;
         const sameCanvas = !beforeCanvas || pageView.div?.querySelector?.("canvas") === beforeCanvas;
         cache.smokePassed = Boolean(
-            cache.smokeIntercepted
+            cache.smokeResetIntercepted
+            && cache.smokeDestroyIntercepted
             && pageView.renderingState === beforeState
             && pageView.div?.childElementCount === beforeChildren
             && sameCanvas,
@@ -272,8 +350,15 @@ var BilingualSync = {
             }
         }
         if (cache.onUnload) win.removeEventListener?.("unload", cache.onUnload);
-        for (const { pageView, originalDestroy, wrappedDestroy } of cache.wrapped || []) {
+        for (const {
+            pageView,
+            originalDestroy,
+            wrappedDestroy,
+            originalReset,
+            wrappedReset,
+        } of cache.wrapped || []) {
             if (pageView.destroy === wrappedDestroy) pageView.destroy = originalDestroy;
+            if (pageView.reset === wrappedReset) pageView.reset = originalReset;
         }
         try {
             delete win.__bilingualResidentPageCache;
