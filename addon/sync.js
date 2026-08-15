@@ -1,0 +1,482 @@
+/* global Zotero */
+
+var BilingualSync = {
+    pluginID: "bilingual-linked-reader@houxin2024.github.io",
+    mapCache: new Map(),
+    viewerState: new WeakMap(),
+    readyReaders: new WeakSet(),
+    handler: null,
+    toolbarHandler: null,
+    active: false,
+
+    async start() {
+        this.active = true;
+        this.handler = (event) => {
+            this.handleSelection(event).catch(error => {
+                Zotero.logError(error);
+                Zotero.debug("[BilingualSync] selection failed: " + error);
+            });
+        };
+        this.toolbarHandler = (event) => {
+            this.prepareSingleClick(event.reader).catch(error => {
+                Zotero.logError(error);
+                Zotero.debug("[BilingualSync] single-click setup failed: " + error);
+            });
+        };
+        Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.handler, this.pluginID);
+        Zotero.Reader.registerEventListener("renderToolbar", this.toolbarHandler, this.pluginID);
+        Zotero.debug("[BilingualSync] started");
+        this.bootstrapOpenReaders().catch(error => {
+            Zotero.logError(error);
+            Zotero.debug("[BilingualSync] reader bootstrap failed: " + error);
+        });
+    },
+
+    stop() {
+        this.active = false;
+        if (this.handler) {
+            Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this.handler);
+        }
+        if (this.toolbarHandler) {
+            Zotero.Reader.unregisterEventListener("renderToolbar", this.toolbarHandler);
+        }
+        this.handler = null;
+        this.toolbarHandler = null;
+        this.mapCache.clear();
+        this.readyReaders = new WeakSet();
+    },
+
+    getViewerWindow(reader) {
+        const roots = [
+            reader?._lastView?._iframeWindow,
+            reader?._internalReader?._primaryView?._iframeWindow,
+            reader?._iframeWindow,
+        ].filter(Boolean);
+        const seen = new Set();
+        const queue = roots.map(win => ({ win, depth: 0 }));
+        while (queue.length) {
+            const { win, depth } = queue.shift();
+            if (!win || seen.has(win)) continue;
+            seen.add(win);
+            try {
+                if (win.PDFViewerApplication?.pdfViewer) return win;
+                if (depth >= 3) continue;
+                for (let index = 0; index < win.frames.length; index++) {
+                    queue.push({ win: win.frames[index], depth: depth + 1 });
+                }
+            }
+            catch (error) {
+                // Ignore inaccessible frames and continue with known reader windows.
+            }
+        }
+        return roots[0] || null;
+    },
+
+    async getAttachmentPath(reader) {
+        const item = reader?._item || Zotero.Items.get(reader?.itemID);
+        if (!item) return null;
+        if (typeof item.getFilePathAsync === "function") return item.getFilePathAsync();
+        return item.getFilePath?.() || null;
+    },
+
+    async readJSON(path) {
+        if (typeof Zotero.File?.getContentsAsync === "function") {
+            return JSON.parse(await Zotero.File.getContentsAsync(path));
+        }
+        throw new Error("Zotero.File.getContentsAsync is unavailable");
+    },
+
+    indexMap(map) {
+        if (map.__bilingualIndex) return map;
+        const pages = new Map((map.pages || []).map(page => [Number(page.pageIndex), page]));
+        const segments = new Map();
+        for (const segment of map.segments || []) {
+            const pageIndex = Number(segment.pageIndex);
+            if (!segments.has(pageIndex)) segments.set(pageIndex, []);
+            segments.get(pageIndex).push(segment);
+        }
+        Object.defineProperty(map, "__bilingualIndex", {
+            value: { pages, segments },
+            enumerable: false,
+        });
+        return map;
+    },
+
+    async readRemoteJSON(url) {
+        const response = await Zotero.HTTP.request("GET", url, {
+            responseType: "json",
+            timeout: 1800,
+        });
+        return typeof response.response === "string"
+            ? JSON.parse(response.response)
+            : response.response;
+    },
+
+    async loadMap(pdfPath) {
+        if (this.mapCache.has(pdfPath)) return this.mapCache.get(pdfPath);
+        const basename = pdfPath.replace(/^.*[\\/]/, "");
+        const candidates = [pdfPath + ".bilingual.json"];
+        const mapDirectory = String(
+            Zotero.Prefs.get("extensions.bilingualLinkedReader.mapDirectory", true) || "",
+        ).replace(/[\\/]$/, "");
+        if (mapDirectory) candidates.push(mapDirectory + "\\" + basename + ".bilingual.json");
+        for (const path of candidates) {
+            try {
+                const map = this.indexMap(await this.readJSON(path));
+                this.mapCache.set(pdfPath, map);
+                Zotero.debug("[BilingualSync] loaded map: " + path);
+                return map;
+            }
+            catch (error) {
+                // Try the next deterministic location.
+            }
+        }
+        try {
+            const server = String(
+                Zotero.Prefs.get("extensions.bilingualLinkedReader.serverURL", true)
+                || Zotero.Prefs.get("extensions.zotero.pdf2zh.new_serverip", true)
+                || "http://127.0.0.1:8890",
+            ).replace(/\/$/, "");
+            const url = server + "/translatedFile/" + encodeURIComponent(basename + ".bilingual.json");
+            const map = this.indexMap(await this.readRemoteJSON(url));
+            this.mapCache.set(pdfPath, map);
+            Zotero.debug("[BilingualSync] loaded map: " + url);
+            return map;
+        }
+        catch (error) {
+            // A map may appear after translation finishes, so do not cache misses.
+        }
+        return null;
+    },
+
+    clearOverlay(win) {
+        if (!win?.document) return;
+        for (const node of win.document.querySelectorAll(".codex-bilingual-linked-highlight")) {
+            node.remove();
+        }
+    },
+
+    ensureSelectionWatcher(win) {
+        const state = this.viewerState.get(win) || {};
+        if (state.onSelectionChange) return;
+        const onSelectionChange = () => {
+            win.setTimeout(() => {
+                const selected = win.getSelection?.()?.toString()?.trim();
+                if (!selected && Date.now() - (state.lastLinkedClickAt || 0) > 180) {
+                    this.clearOverlay(win);
+                }
+            }, 80);
+        };
+        win.document.addEventListener("selectionchange", onSelectionChange);
+        state.onSelectionChange = onSelectionChange;
+        this.viewerState.set(win, state);
+    },
+
+    async prepareSingleClick(reader) {
+        if (!reader) return;
+        const pdfPath = await this.getAttachmentPath(reader);
+        if (!pdfPath) return;
+        const label = pdfPath + " " + (reader?._item?.getField?.("title") || "");
+        if (!/(compare|dual)/i.test(label)) return;
+        const map = await this.loadMap(pdfPath);
+        if (!map) return;
+        for (let attempt = 0; attempt < 30; attempt++) {
+            const win = this.getViewerWindow(reader);
+            if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
+                this.ensureSelectionWatcher(win);
+                this.ensureClickWatcher(win, pdfPath, map);
+                this.readyReaders.add(reader);
+                return;
+            }
+            await Zotero.Promise.delay(250);
+        }
+    },
+
+    async bootstrapOpenReaders() {
+        for (let attempt = 0; this.active && attempt < 40; attempt++) {
+            for (const reader of Zotero.Reader._readers || []) {
+                if (!this.readyReaders.has(reader)) await this.prepareSingleClick(reader);
+            }
+            await Zotero.Promise.delay(500);
+        }
+    },
+
+    ensureClickWatcher(win, pdfPath, map) {
+        const state = this.viewerState.get(win) || {};
+        if (state.onClick) return;
+        const ignoredTarget = target => target?.closest?.(
+            "a,button,input,textarea,select,[role='button'],.toolbar,.annotationEditorLayer",
+        );
+        const onClick = event => {
+            if (event.button !== 0 || event.detail !== 1 || ignoredTarget(event.target)) return;
+            const click = {
+                clientX: event.clientX,
+                clientY: event.clientY,
+                target: event.target,
+            };
+            state.lastLinkedClickAt = Date.now();
+            if (state.clickFrame) win.cancelAnimationFrame(state.clickFrame);
+            state.clickFrame = win.requestAnimationFrame(() => {
+                state.clickFrame = null;
+                this.handlePageClick(win, pdfPath, map, click).catch(error => {
+                    Zotero.logError(error);
+                    Zotero.debug("[BilingualSync] single click failed: " + error);
+                });
+            });
+        };
+        const onDoubleClick = () => {
+            if (state.clickFrame) {
+                win.cancelAnimationFrame(state.clickFrame);
+                state.clickFrame = null;
+            }
+            this.clearOverlay(win);
+        };
+        win.document.addEventListener("click", onClick, true);
+        win.document.addEventListener("dblclick", onDoubleClick, true);
+        state.onClick = onClick;
+        state.onDoubleClick = onDoubleClick;
+        this.viewerState.set(win, state);
+    },
+
+    clickPosition(win, click) {
+        const viewer = win.PDFViewerApplication?.pdfViewer;
+        if (!viewer) return null;
+        for (let pageIndex = 0; pageIndex < viewer.pagesCount; pageIndex++) {
+            const pageView = viewer.getPageView(pageIndex);
+            if (!pageView?.div?.contains(click.target) || !pageView.viewport) continue;
+            const surface = pageView.canvas || pageView.div;
+            const bounds = surface.getBoundingClientRect();
+            if (!bounds.width || !bounds.height) return null;
+            const viewportX = (click.clientX - bounds.left) * pageView.viewport.width / bounds.width;
+            const viewportY = (click.clientY - bounds.top) * pageView.viewport.height / bounds.height;
+            const [pdfX, pdfY] = pageView.viewport.convertToPdfPoint(viewportX, viewportY);
+            return { pageIndex, pdfX, pdfY };
+        }
+        return null;
+    },
+
+    async handlePageClick(win, pdfPath, map, click) {
+        const position = this.clickPosition(win, click);
+        if (!position) return;
+        const pointRect = [
+            position.pdfX - 0.8,
+            position.pdfY - 0.8,
+            position.pdfX + 0.8,
+            position.pdfY + 0.8,
+        ];
+        const target = this.findTarget(map, position.pageIndex, [pointRect]);
+        this.clearOverlay(win);
+        if (!target) return;
+        this.drawOverlay(win, position.pageIndex, target.sourceRects || [], "source");
+        if (!this.drawOverlay(win, position.pageIndex, target.rects || [], "target")) return;
+        Zotero.debug("[BilingualSync] linked " + target.direction + " on page " + (position.pageIndex + 1));
+    },
+
+    unionRects(rects) {
+        return [
+            Math.min(...rects.map(rect => rect[0])),
+            Math.min(...rects.map(rect => rect[1])),
+            Math.max(...rects.map(rect => rect[2])),
+            Math.max(...rects.map(rect => rect[3])),
+        ];
+    },
+
+    intersectionArea(a, b) {
+        const width = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+        const height = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+        return width * height;
+    },
+
+    candidateScore(selection, box) {
+        if (!box) return -Infinity;
+        const overlap = this.intersectionArea(selection, box);
+        const selectionArea = Math.max(1, (selection[2] - selection[0]) * (selection[3] - selection[1]));
+        const cx = (selection[0] + selection[2]) / 2;
+        const cy = (selection[1] + selection[3]) / 2;
+        const containsCenter = box[0] <= cx && cx <= box[2] && box[1] <= cy && cy <= box[3];
+        const dx = Math.max(box[0] - cx, 0, cx - box[2]);
+        const dy = Math.max(box[1] - cy, 0, cy - box[3]);
+        return overlap / selectionArea + (containsCenter ? 4 : 0) - 0.004 * dy - 0.001 * dx;
+    },
+
+    rectSetScore(selectionRects, candidateRects) {
+        if (!selectionRects?.length || !candidateRects?.length) return -Infinity;
+        const selectionArea = selectionRects.reduce(
+            (sum, rect) => sum + Math.max(1, (rect[2] - rect[0]) * (rect[3] - rect[1])),
+            0,
+        );
+        let overlap = 0;
+        let centerHits = 0;
+        for (const selection of selectionRects) {
+            const cx = (selection[0] + selection[2]) / 2;
+            const cy = (selection[1] + selection[3]) / 2;
+            for (const candidate of candidateRects) {
+                overlap += this.intersectionArea(selection, candidate);
+                if (candidate[0] <= cx && cx <= candidate[2] && candidate[1] <= cy && cy <= candidate[3]) {
+                    centerHits += 1;
+                    break;
+                }
+            }
+        }
+        const selectionUnion = this.unionRects(selectionRects);
+        const candidateUnion = this.unionRects(candidateRects);
+        const fallback = this.candidateScore(selectionUnion, candidateUnion);
+        return 5 * overlap / selectionArea + 1.5 * centerHits / selectionRects.length + 0.12 * fallback;
+    },
+
+    lexicalCount(text) {
+        return (String(text || "").match(/[A-Za-z\u3400-\u9fff]/g) || []).length;
+    },
+
+    isProsePair(pair) {
+        const english = pair.enText || "";
+        const likelyReference = /^\s*\d{1,3}\.\s+[A-Z]/.test(english)
+            || (/\b(?:Nature|Science|Nat\.|Cell|Proc\.|Bioinform\.|Biotechnol\.|Immunol\.)\b/.test(english)
+                && /\(20\d{2}\)/.test(english));
+        const lowSemanticConfidence = Number.isFinite(pair.semanticScore) && pair.semanticScore < 0.42;
+        return !likelyReference
+            && !lowSemanticConfidence
+            && this.lexicalCount(english) >= 8
+            && this.lexicalCount(pair.zhText) >= 5
+            && /[A-Za-z]{4,}/.test(english)
+            && /[\u3400-\u9fff]{3,}/.test(pair.zhText || "");
+    },
+
+    bestUnitIndex(selection, units) {
+        if (!units?.length) return -1;
+        let bestIndex = 0;
+        let bestScore = -Infinity;
+        units.forEach((unit, index) => {
+            const score = this.candidateScore(selection, unit.box);
+            if (score > bestScore) {
+                bestIndex = index;
+                bestScore = score;
+            }
+        });
+        return bestIndex;
+    },
+
+    correspondingUnit(sourceIndex, sourceUnits, targetUnits) {
+        if (sourceIndex < 0 || !targetUnits?.length) return null;
+        if (sourceUnits.length === 1 || targetUnits.length === 1) return targetUnits[0];
+        const fraction = sourceIndex / (sourceUnits.length - 1);
+        return targetUnits[Math.round(fraction * (targetUnits.length - 1))];
+    },
+
+    findTarget(map, pageIndex, selectionRects) {
+        const index = map.__bilingualIndex || this.indexMap(map).__bilingualIndex;
+        const page = index.pages.get(pageIndex);
+        if (!page) return null;
+        const selection = this.unionRects(selectionRects);
+        const isLeft = ((selection[0] + selection[2]) / 2) < page.rightOffset;
+        const segments = index.segments.get(pageIndex) || [];
+        let best = null;
+        let bestScore = -Infinity;
+        for (const segment of segments) {
+            const sourceBox = isLeft ? segment.zhBox : segment.enBox;
+            const score = this.candidateScore(selection, sourceBox);
+            if (score > bestScore) {
+                best = segment;
+                bestScore = score;
+            }
+        }
+        if (!best || bestScore < -1.5) return null;
+        if (map.version >= 2 && best.sentencePairs?.length) {
+            let bestPair = null;
+            let bestPairScore = -Infinity;
+            for (const pair of best.sentencePairs) {
+                if (!this.isProsePair(pair)) continue;
+                const sourceRects = isLeft ? pair.zhRects : pair.enRects;
+                const score = this.rectSetScore(selectionRects, sourceRects);
+                if (score > bestPairScore) {
+                    bestPair = pair;
+                    bestPairScore = score;
+                }
+            }
+            if (bestPair && bestPairScore > 0.25) {
+                return {
+                    sourceRects: isLeft ? bestPair.zhRects : bestPair.enRects,
+                    rects: isLeft ? bestPair.enRects : bestPair.zhRects,
+                    sourceText: isLeft ? bestPair.zhText : bestPair.enText,
+                    targetText: isLeft ? bestPair.enText : bestPair.zhText,
+                    direction: isLeft ? "中→英" : "英→中",
+                    matchScore: Math.round(bestPairScore * 1000) / 1000,
+                    mapVersion: map.version,
+                };
+            }
+            if (map.version >= 3) return null;
+        }
+        const sourceUnits = isLeft ? best.zhSentences : best.enSentences;
+        const targetUnits = isLeft ? best.enSentences : best.zhSentences;
+        const sourceIndex = this.bestUnitIndex(selection, sourceUnits);
+        const targetUnit = this.correspondingUnit(sourceIndex, sourceUnits, targetUnits);
+        return {
+            sourceRects: sourceUnits[sourceIndex]?.rects || (sourceUnits[sourceIndex]?.box ? [sourceUnits[sourceIndex].box] : []),
+            rects: targetUnit?.box ? [targetUnit.box] : [isLeft ? best.enBox : best.zhBox],
+            direction: isLeft ? "中→英" : "英→中",
+            mapVersion: map.version || 1,
+        };
+    },
+
+    drawOverlay(win, pageIndex, rects, role = "target") {
+        const viewer = win.PDFViewerApplication?.pdfViewer;
+        const pageView = viewer?.getPageView(pageIndex);
+        if (!pageView?.div || !pageView?.viewport) return false;
+        const sourceRole = role === "source";
+        for (const rect of rects) {
+            const p1 = pageView.viewport.convertToViewportPoint(rect[0], rect[1]);
+            const p2 = pageView.viewport.convertToViewportPoint(rect[2], rect[3]);
+            const left = Math.min(p1[0], p2[0]);
+            const top = Math.min(p1[1], p2[1]);
+            const right = Math.max(p1[0], p2[0]);
+            const bottom = Math.max(p1[1], p2[1]);
+            const node = win.document.createElement("div");
+            node.className = "codex-bilingual-linked-highlight codex-bilingual-" + role;
+            Object.assign(node.style, {
+                position: "absolute",
+                left: left + "px",
+                top: top + "px",
+                width: Math.max(2, right - left) + "px",
+                height: Math.max(2, bottom - top) + "px",
+                background: sourceRole ? "rgba(14, 165, 233, 0.18)" : "rgba(255, 193, 7, 0.34)",
+                border: sourceRole ? "1px solid rgba(2, 132, 199, 0.74)" : "1px solid rgba(245, 139, 0, 0.82)",
+                borderRadius: "2px",
+                boxSizing: "border-box",
+                pointerEvents: "none",
+                zIndex: "8",
+                mixBlendMode: "multiply",
+            });
+            pageView.div.appendChild(node);
+        }
+        return true;
+    },
+
+    async handleSelection(event) {
+        const { reader, params, doc, append } = event;
+        const position = params?.annotation?.position;
+        if (!position?.rects?.length || !Number.isInteger(position.pageIndex)) return;
+        const pdfPath = await this.getAttachmentPath(reader);
+        if (!pdfPath) return;
+        const label = pdfPath + " " + (reader?._item?.getField?.("title") || "");
+        const compareMode = /(compare|dual)/i.test(label);
+        const map = await this.loadMap(pdfPath);
+        if (!map) return;
+        const win = this.getViewerWindow(reader);
+        if (!win) return;
+        this.ensureSelectionWatcher(win);
+        if (compareMode) this.ensureClickWatcher(win, pdfPath, map);
+        this.clearOverlay(win);
+        if (compareMode) {
+            const target = this.findTarget(map, position.pageIndex, position.rects);
+            if (!target) return;
+            this.drawOverlay(win, position.pageIndex, target.sourceRects || [], "source");
+            if (!this.drawOverlay(win, position.pageIndex, target.rects, "target")) return;
+            const badge = doc.createElement("span");
+            badge.textContent = "↔";
+            badge.title = "精确双语联动（" + target.direction + "）";
+            badge.style.cssText = "font-weight:700;color:#d97706;padding:0 4px;";
+            append(badge);
+            return;
+        }
+    },
+};

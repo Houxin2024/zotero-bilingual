@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+model-cache*/
+*.pdf
+*.bilingual.json
+*.tmp
+.idea/
+.vscode/
+.DS_Store
+config.local.*
+*.key
+*.token
