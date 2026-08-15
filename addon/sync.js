@@ -47,6 +47,7 @@ var BilingualSync = {
             "extensions.zotero.pdf2zh.transFirst": true,
             "extensions.zotero.pdf2zh.dual-open": true,
             "extensions.zotero.pdf2zh.disableRichTextTranslate": true,
+            "extensions.bilingualLinkedReader.residentPageCacheEnabled": false,
         };
         for (const [key, value] of Object.entries(preferences)) {
             Zotero.Prefs.set(key, value, true);
@@ -108,6 +109,13 @@ var BilingualSync = {
             : 64;
     },
 
+    residentPageCacheEnabled() {
+        // Fail safe: the experimental canvas-retention hook interfered with
+        // PDF.js retries on some translated documents. Keep all renderer
+        // lifecycle methods untouched until a non-invasive cache exists.
+        return false;
+    },
+
     listenToViewer(eventBus, eventName, handler) {
         if (typeof eventBus?._on === "function") {
             eventBus._on(eventName, handler);
@@ -153,11 +161,35 @@ var BilingualSync = {
     },
 
     ensureResidentPageCache(win, pdfPath) {
+        const state = this.viewerState.get(win) || {};
+        if (!this.residentPageCacheEnabled()) {
+            if (state.residentCache) this.releaseResidentPageCache(win);
+            if (!state.residentCacheDisabledReported) {
+                state.residentCacheDisabledReported = true;
+                this.viewerState.set(win, state);
+                if (typeof this.writeStatus === "function") {
+                    this.writeStatus({
+                        state: "pdfjs-native-rendering-ready",
+                        cacheUpdatedAt: new Date().toISOString(),
+                        attachment: pdfPath.replace(/^.*[\\/]/, ""),
+                        cachedPages: [],
+                        cachedPageCount: 0,
+                        cacheStrategy: "disabled-use-pdfjs-native-cache",
+                        retainedOnlyWhenFinished: null,
+                        residentCacheSmokePassed: null,
+                        residentDetailCacheSmokePassed: null,
+                        preventedEvictions: 0,
+                        preventedResets: 0,
+                        preventedDetailEvictions: 0,
+                    }).catch(error => Zotero.debug("[BilingualSync] native cache status failed: " + error));
+                }
+            }
+            return true;
+        }
         const viewer = win?.PDFViewerApplication?.pdfViewer;
         if (!viewer?.pdfDocument || !viewer.pagesCount || viewer._pages?.length !== viewer.pagesCount) {
             return false;
         }
-        const state = this.viewerState.get(win) || {};
         if (state.residentCache?.enabled && state.residentCache.viewer === viewer) return true;
         if (state.residentCache) this.releaseResidentPageCache(win);
 
@@ -646,11 +678,15 @@ var BilingualSync = {
                 const win = this.getViewerWindow(reader);
                 const cache = win && this.viewerState.get(win)?.residentCache;
                 const viewer = win?.PDFViewerApplication?.pdfViewer;
+                const cacheHealthy = !this.residentPageCacheEnabled()
+                    || (
+                        cache?.enabled
+                        && cache.viewer === viewer
+                        && cache.pdfDocument === viewer?.pdfDocument
+                    );
                 const healthy = this.readyReaders.has(reader)
                     && this.readyReaderWindows.get(reader) === win
-                    && cache?.enabled
-                    && cache.viewer === viewer
-                    && cache.pdfDocument === viewer?.pdfDocument;
+                    && cacheHealthy;
                 if (!healthy) {
                     this.readyReaders.delete(reader);
                     await this.prepareSingleClick(reader);
