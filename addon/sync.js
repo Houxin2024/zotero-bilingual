@@ -5,6 +5,7 @@ var BilingualSync = {
     mapCache: new Map(),
     viewerState: new WeakMap(),
     readyReaders: new WeakSet(),
+    readyReaderWindows: new WeakMap(),
     ignoredReaders: new WeakSet(),
     mapRetry: new WeakMap(),
     residentCacheWindows: new Set(),
@@ -67,6 +68,7 @@ var BilingualSync = {
         this.toolbarHandler = null;
         this.mapCache.clear();
         this.readyReaders = new WeakSet();
+        this.readyReaderWindows = new WeakMap();
         this.ignoredReaders = new WeakSet();
         this.mapRetry = new WeakMap();
     },
@@ -133,8 +135,9 @@ var BilingualSync = {
             documentPages: cache.viewer.pagesCount,
             preventedEvictions: cache.preventedEvictions,
             preventedResets: cache.preventedResets,
+            preventedDetailEvictions: cache.preventedDetailEvictions,
             explicitEvictions: cache.explicitEvictions,
-            cacheStrategy: "retain-visited-render-states",
+            cacheStrategy: "retain-visited-render-and-detail-states",
             warmupState: null,
             warmedPageCount: null,
             warmupPageTotal: null,
@@ -142,6 +145,7 @@ var BilingualSync = {
             warmupStartedAt: null,
             warmupCompletedAt: null,
             residentCacheSmokePassed: cache.smokePassed,
+            residentDetailCacheSmokePassed: cache.smokeDetailPassed,
             residentCacheSmokePage: cache.smokePage,
             residentCacheSmokeAt: cache.smokeAt,
         }).catch(error => Zotero.debug("[BilingualSync] cache status failed: " + error));
@@ -169,6 +173,7 @@ var BilingualSync = {
             removeViewerListeners: [],
             preventedEvictions: 0,
             preventedResets: 0,
+            preventedDetailEvictions: 0,
             explicitEvictions: 0,
             lastStatusAt: 0,
             win,
@@ -182,6 +187,8 @@ var BilingualSync = {
             ) continue;
             const originalDestroy = pageView.destroy;
             const originalReset = pageView.reset;
+            const originalDraw = pageView.draw;
+            const originalUpdateVisibleArea = pageView.updateVisibleArea;
             const wrappedDestroy = function (...args) {
                 if (
                     cache.enabled
@@ -223,14 +230,54 @@ var BilingualSync = {
                 }
                 return originalReset.apply(this, args);
             };
+            const wrappedDraw = typeof originalDraw === "function"
+                ? function (...args) {
+                    const result = originalDraw.apply(this, args);
+                    Promise.resolve(result).then(
+                        () => cache.touch?.(this.id),
+                        () => {},
+                    );
+                    return result;
+                }
+                : null;
+            const wrappedUpdateVisibleArea = typeof originalUpdateVisibleArea === "function"
+                ? function (...args) {
+                    // PDF.js discards the high-resolution detail canvas when a
+                    // page leaves the viewport, even when its normal canvas is
+                    // still resident.  On wide bilingual pages this looks like
+                    // a full reload when scrolling back.  Keep the visited
+                    // page's detail canvas until our own LRU evicts the page.
+                    if (
+                        cache.enabled
+                        && args[0] === null
+                        && viewer.pdfDocument === cache.pdfDocument
+                        && cache.retained.has(this.id)
+                        && this.detailView
+                    ) {
+                        if (cache.smokeMode) cache.smokeDetailIntercepted = true;
+                        else {
+                            cache.preventedDetailEvictions += 1;
+                            controller.reportResidentPageCache(cache);
+                        }
+                        return;
+                    }
+                    return originalUpdateVisibleArea.apply(this, args);
+                }
+                : null;
             pageView.destroy = wrappedDestroy;
             pageView.reset = wrappedReset;
+            if (wrappedDraw) pageView.draw = wrappedDraw;
+            if (wrappedUpdateVisibleArea) pageView.updateVisibleArea = wrappedUpdateVisibleArea;
             cache.wrapped.push({
                 pageView,
                 originalDestroy,
                 wrappedDestroy,
                 originalReset,
                 wrappedReset,
+                originalDraw,
+                wrappedDraw,
+                originalUpdateVisibleArea,
+                wrappedUpdateVisibleArea,
             });
         }
 
@@ -272,6 +319,18 @@ var BilingualSync = {
             cache.protected.set(pageView.id, pageView);
         };
 
+        cache.captureFinishedPages = () => {
+            if (!cache.enabled) return;
+            let changed = false;
+            for (const pageView of viewer._pages) {
+                if (pageView?.renderingState === 3 && !cache.retained.has(pageView.id)) {
+                    cache.markRetained(pageView.id);
+                    changed = true;
+                }
+            }
+            if (changed) controller.reportResidentPageCache(cache, true);
+        };
+
         for (const pageView of viewer._pages) {
             cache.markRetained(pageView.id);
             cache.touch(pageView.id);
@@ -290,13 +349,23 @@ var BilingualSync = {
             runSmokeWhenReady();
         };
         const onPageChanging = event => cache.markRetained(event.pageNumber);
+        const onUpdateViewArea = () => cache.captureFinishedPages();
         const onPagesDestroy = () => controller.releaseResidentPageCache(win);
         cache.removeViewerListeners.push(
             this.listenToViewer(viewer.eventBus, "pagerender", onPageRender),
             this.listenToViewer(viewer.eventBus, "pagerendered", onPageRendered),
             this.listenToViewer(viewer.eventBus, "pagechanging", onPageChanging),
+            this.listenToViewer(viewer.eventBus, "updateviewarea", onUpdateViewArea),
             this.listenToViewer(viewer.eventBus, "pagesdestroy", onPagesDestroy),
         );
+        cache.onViewerScroll = () => {
+            if (cache.scrollFrame) return;
+            cache.scrollFrame = win.requestAnimationFrame(() => {
+                cache.scrollFrame = null;
+                cache.captureFinishedPages();
+            });
+        };
+        viewer.container?.addEventListener?.("scroll", cache.onViewerScroll, { passive: true });
         cache.onUnload = () => controller.releaseResidentPageCache(win);
         win.addEventListener("unload", cache.onUnload, { once: true });
         win.__bilingualResidentPageCache = () => ({
@@ -306,7 +375,9 @@ var BilingualSync = {
             cachedPages: [...cache.retained.keys()],
             preventedEvictions: cache.preventedEvictions,
             preventedResets: cache.preventedResets,
+            preventedDetailEvictions: cache.preventedDetailEvictions,
             explicitEvictions: cache.explicitEvictions,
+            detailCacheSmokePassed: cache.smokeDetailPassed,
         });
         state.residentCache = cache;
         this.viewerState.set(win, state);
@@ -328,6 +399,22 @@ var BilingualSync = {
         cache.smokeMode = true;
         cache.smokeResetIntercepted = false;
         cache.smokeDestroyIntercepted = false;
+        cache.smokeDetailIntercepted = false;
+        const originalDetailView = pageView.detailView;
+        let sentinelDetailReset = false;
+        const sentinelDetailView = {
+            reset() {
+                sentinelDetailReset = true;
+            },
+        };
+        pageView.detailView = sentinelDetailView;
+        pageView.updateVisibleArea?.(null);
+        cache.smokeDetailPassed = Boolean(
+            cache.smokeDetailIntercepted
+            && !sentinelDetailReset
+            && pageView.detailView === sentinelDetailView
+        );
+        pageView.detailView = originalDetailView;
         pageView.reset();
         pageView.destroy();
         cache.smokeMode = false;
@@ -335,6 +422,7 @@ var BilingualSync = {
         cache.smokePassed = Boolean(
             cache.smokeResetIntercepted
             && cache.smokeDestroyIntercepted
+            && cache.smokeDetailPassed
             && pageView.renderingState === beforeState
             && pageView.div?.childElementCount === beforeChildren
             && sameCanvas,
@@ -358,15 +446,30 @@ var BilingualSync = {
             }
         }
         if (cache.onUnload) win.removeEventListener?.("unload", cache.onUnload);
+        if (cache.onViewerScroll) {
+            cache.viewer.container?.removeEventListener?.("scroll", cache.onViewerScroll);
+        }
+        if (cache.scrollFrame) win.cancelAnimationFrame?.(cache.scrollFrame);
         for (const {
             pageView,
             originalDestroy,
             wrappedDestroy,
             originalReset,
             wrappedReset,
+            originalDraw,
+            wrappedDraw,
+            originalUpdateVisibleArea,
+            wrappedUpdateVisibleArea,
         } of cache.wrapped || []) {
             if (pageView.destroy === wrappedDestroy) pageView.destroy = originalDestroy;
             if (pageView.reset === wrappedReset) pageView.reset = originalReset;
+            if (wrappedDraw && pageView.draw === wrappedDraw) pageView.draw = originalDraw;
+            if (
+                wrappedUpdateVisibleArea
+                && pageView.updateVisibleArea === wrappedUpdateVisibleArea
+            ) {
+                pageView.updateVisibleArea = originalUpdateVisibleArea;
+            }
         }
         try {
             delete win.__bilingualResidentPageCache;
@@ -512,6 +615,7 @@ var BilingualSync = {
                 this.ensureSelectionWatcher(win);
                 this.ensureClickWatcher(win, pdfPath, map);
                 this.readyReaders.add(reader);
+                this.readyReaderWindows.set(reader, win);
                 await this.runSingleClickSmokeTest(win, map);
                 return;
             }
@@ -525,7 +629,17 @@ var BilingualSync = {
         // the click handler even when renderToolbar is not emitted again.
         while (this.active) {
             for (const reader of Zotero.Reader._readers || []) {
-                if (!this.readyReaders.has(reader) && !this.ignoredReaders.has(reader)) {
+                if (this.ignoredReaders.has(reader)) continue;
+                const win = this.getViewerWindow(reader);
+                const cache = win && this.viewerState.get(win)?.residentCache;
+                const viewer = win?.PDFViewerApplication?.pdfViewer;
+                const healthy = this.readyReaders.has(reader)
+                    && this.readyReaderWindows.get(reader) === win
+                    && cache?.enabled
+                    && cache.viewer === viewer
+                    && cache.pdfDocument === viewer?.pdfDocument;
+                if (!healthy) {
+                    this.readyReaders.delete(reader);
                     await this.prepareSingleClick(reader);
                 }
             }
