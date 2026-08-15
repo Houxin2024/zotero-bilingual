@@ -7,6 +7,7 @@ var BilingualSync = {
     readyReaders: new WeakSet(),
     ignoredReaders: new WeakSet(),
     mapRetry: new WeakMap(),
+    residentCacheWindows: new Set(),
     handler: null,
     toolbarHandler: null,
     active: false,
@@ -51,6 +52,9 @@ var BilingualSync = {
 
     stop() {
         this.active = false;
+        for (const win of [...this.residentCacheWindows]) {
+            this.releaseResidentPageCache(win);
+        }
         if (this.handler) {
             Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this.handler);
         }
@@ -89,6 +93,197 @@ var BilingualSync = {
             }
         }
         return roots[0] || null;
+    },
+
+    residentPageLimit() {
+        const configured = Number(
+            Zotero.Prefs.get("extensions.bilingualLinkedReader.residentPageLimit", true),
+        );
+        return Number.isFinite(configured) && configured > 0
+            ? Math.max(10, Math.min(128, Math.round(configured)))
+            : 64;
+    },
+
+    listenToViewer(eventBus, eventName, handler) {
+        if (typeof eventBus?._on === "function") {
+            eventBus._on(eventName, handler);
+            return () => eventBus._off?.(eventName, handler);
+        }
+        if (typeof eventBus?.on === "function") {
+            eventBus.on(eventName, handler);
+            return () => eventBus.off?.(eventName, handler);
+        }
+        return () => {};
+    },
+
+    reportResidentPageCache(cache, force = false) {
+        if (typeof this.writeStatus !== "function" || !cache?.enabled) return;
+        const now = Date.now();
+        if (!force && now - cache.lastStatusAt < 2000) return;
+        cache.lastStatusAt = now;
+        this.writeStatus({
+            state: "resident-page-cache-ready",
+            cacheUpdatedAt: new Date().toISOString(),
+            attachment: cache.attachment,
+            cachedPages: [...cache.protected.keys()],
+            cachedPageCount: cache.protected.size,
+            cacheLimit: cache.limit,
+            documentPages: cache.viewer.pagesCount,
+            preventedEvictions: cache.preventedEvictions,
+            explicitEvictions: cache.explicitEvictions,
+            residentCacheSmokePassed: cache.smokePassed,
+            residentCacheSmokePage: cache.smokePage,
+            residentCacheSmokeAt: cache.smokeAt,
+        }).catch(error => Zotero.debug("[BilingualSync] cache status failed: " + error));
+    },
+
+    ensureResidentPageCache(win, pdfPath) {
+        const viewer = win?.PDFViewerApplication?.pdfViewer;
+        if (!viewer?.pdfDocument || !viewer.pagesCount || viewer._pages?.length !== viewer.pagesCount) {
+            return false;
+        }
+        const state = this.viewerState.get(win) || {};
+        if (state.residentCache?.enabled && state.residentCache.viewer === viewer) return true;
+        if (state.residentCache) this.releaseResidentPageCache(win);
+
+        const controller = this;
+        const cache = {
+            enabled: true,
+            viewer,
+            pdfDocument: viewer.pdfDocument,
+            attachment: pdfPath.replace(/^.*[\\/]/, ""),
+            limit: Math.min(this.residentPageLimit(), viewer.pagesCount),
+            protected: new Map(),
+            wrapped: [],
+            removeViewerListeners: [],
+            preventedEvictions: 0,
+            explicitEvictions: 0,
+            lastStatusAt: 0,
+        };
+
+        for (const pageView of viewer._pages) {
+            if (!pageView || typeof pageView.destroy !== "function") continue;
+            const originalDestroy = pageView.destroy;
+            const wrappedDestroy = function (...args) {
+                if (
+                    cache.enabled
+                    && viewer.pdfDocument === cache.pdfDocument
+                    && cache.protected.has(this.id)
+                ) {
+                    if (cache.smokeMode) {
+                        cache.smokeIntercepted = true;
+                    }
+                    else {
+                        cache.preventedEvictions += 1;
+                        controller.reportResidentPageCache(cache);
+                    }
+                    return;
+                }
+                return originalDestroy.apply(this, args);
+            };
+            pageView.destroy = wrappedDestroy;
+            cache.wrapped.push({ pageView, originalDestroy, wrappedDestroy });
+        }
+
+        cache.touch = (pageNumber) => {
+            if (!cache.enabled) return;
+            const pageView = viewer.getPageView(Number(pageNumber) - 1);
+            if (!pageView) return;
+            const rendered = pageView.renderingState === 3
+                || pageView.div?.hasAttribute?.("data-loaded")
+                || pageView.div?.querySelector?.("canvas");
+            if (!rendered) return;
+            cache.protected.delete(pageView.id);
+            cache.protected.set(pageView.id, pageView);
+            while (cache.protected.size > cache.limit) {
+                const oldest = cache.protected.entries().next().value;
+                if (!oldest) break;
+                const [oldestID, oldestView] = oldest;
+                cache.protected.delete(oldestID);
+                const wrapped = cache.wrapped.find(entry => entry.pageView === oldestView);
+                wrapped?.originalDestroy.call(oldestView);
+                cache.explicitEvictions += 1;
+            }
+        };
+
+        for (const pageView of viewer._pages) cache.touch(pageView.id);
+        const onPageRendered = event => cache.touch(event.pageNumber);
+        const onPageChanging = event => cache.touch(event.pageNumber);
+        const onPagesDestroy = () => controller.releaseResidentPageCache(win);
+        cache.removeViewerListeners.push(
+            this.listenToViewer(viewer.eventBus, "pagerendered", onPageRendered),
+            this.listenToViewer(viewer.eventBus, "pagechanging", onPageChanging),
+            this.listenToViewer(viewer.eventBus, "pagesdestroy", onPagesDestroy),
+        );
+        cache.onUnload = () => controller.releaseResidentPageCache(win);
+        win.addEventListener("unload", cache.onUnload, { once: true });
+        win.__bilingualResidentPageCache = () => ({
+            attachment: cache.attachment,
+            limit: cache.limit,
+            documentPages: viewer.pagesCount,
+            cachedPages: [...cache.protected.keys()],
+            preventedEvictions: cache.preventedEvictions,
+            explicitEvictions: cache.explicitEvictions,
+        });
+        state.residentCache = cache;
+        this.viewerState.set(win, state);
+        this.residentCacheWindows.add(win);
+        this.runResidentPageCacheSmokeTest(cache);
+        this.reportResidentPageCache(cache, true);
+        Zotero.debug(`[BilingualSync] resident page cache ready: ${cache.limit}/${viewer.pagesCount}`);
+        return true;
+    },
+
+    runResidentPageCacheSmokeTest(cache) {
+        if (cache.smokeTested) return cache.smokePassed;
+        cache.smokeTested = true;
+        const pageView = cache.protected.values().next().value;
+        if (!pageView) return false;
+        const beforeState = pageView.renderingState;
+        const beforeChildren = pageView.div?.childElementCount;
+        const beforeCanvas = pageView.div?.querySelector?.("canvas") || null;
+        cache.smokeMode = true;
+        cache.smokeIntercepted = false;
+        pageView.destroy();
+        cache.smokeMode = false;
+        const sameCanvas = !beforeCanvas || pageView.div?.querySelector?.("canvas") === beforeCanvas;
+        cache.smokePassed = Boolean(
+            cache.smokeIntercepted
+            && pageView.renderingState === beforeState
+            && pageView.div?.childElementCount === beforeChildren
+            && sameCanvas,
+        );
+        cache.smokePage = pageView.id;
+        cache.smokeAt = new Date().toISOString();
+        return cache.smokePassed;
+    },
+
+    releaseResidentPageCache(win) {
+        const state = this.viewerState.get(win);
+        const cache = state?.residentCache;
+        if (!cache) return;
+        cache.enabled = false;
+        for (const removeListener of cache.removeViewerListeners || []) {
+            try {
+                removeListener();
+            }
+            catch (error) {
+                Zotero.debug("[BilingualSync] cache listener cleanup failed: " + error);
+            }
+        }
+        if (cache.onUnload) win.removeEventListener?.("unload", cache.onUnload);
+        for (const { pageView, originalDestroy, wrappedDestroy } of cache.wrapped || []) {
+            if (pageView.destroy === wrappedDestroy) pageView.destroy = originalDestroy;
+        }
+        try {
+            delete win.__bilingualResidentPageCache;
+        }
+        catch (error) {
+            // The reader window is already being destroyed.
+        }
+        state.residentCache = null;
+        this.viewerState.set(win, state);
+        this.residentCacheWindows.delete(win);
     },
 
     async getAttachmentPath(reader) {
@@ -193,8 +388,6 @@ var BilingualSync = {
 
     async prepareSingleClick(reader) {
         if (!reader || this.ignoredReaders.has(reader)) return;
-        const retry = this.mapRetry.get(reader);
-        if (retry?.at > Date.now()) return;
         const pdfPath = await this.getAttachmentPath(reader);
         if (!pdfPath) return;
         const label = pdfPath + " " + (reader?._item?.getField?.("title") || "");
@@ -202,6 +395,12 @@ var BilingualSync = {
             this.ignoredReaders.add(reader);
             return;
         }
+        let win = this.getViewerWindow(reader);
+        if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
+            this.ensureResidentPageCache(win, pdfPath);
+        }
+        const retry = this.mapRetry.get(reader);
+        if (retry?.at > Date.now()) return;
         const map = await this.loadMap(pdfPath);
         if (!map) {
             const attempts = (retry?.attempts || 0) + 1;
@@ -211,8 +410,9 @@ var BilingualSync = {
         }
         this.mapRetry.delete(reader);
         for (let attempt = 0; attempt < 30; attempt++) {
-            const win = this.getViewerWindow(reader);
+            win = this.getViewerWindow(reader);
             if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
+                this.ensureResidentPageCache(win, pdfPath);
                 this.ensureSelectionWatcher(win);
                 this.ensureClickWatcher(win, pdfPath, map);
                 this.readyReaders.add(reader);
