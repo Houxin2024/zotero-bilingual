@@ -43,6 +43,7 @@ var BilingualSync = {
             "extensions.zotero.pdf2zh.noDual": false,
             "extensions.zotero.pdf2zh.dual": true,
             "extensions.zotero.pdf2zh.dualMode": "LR",
+            "extensions.zotero.pdf2zh.transFirst": true,
             "extensions.zotero.pdf2zh.dual-open": true,
             "extensions.zotero.pdf2zh.disableRichTextTranslate": true,
         };
