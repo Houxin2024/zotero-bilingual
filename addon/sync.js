@@ -134,6 +134,13 @@ var BilingualSync = {
             preventedEvictions: cache.preventedEvictions,
             preventedResets: cache.preventedResets,
             explicitEvictions: cache.explicitEvictions,
+            cacheStrategy: "retain-visited-render-states",
+            warmupState: null,
+            warmedPageCount: null,
+            warmupPageTotal: null,
+            warmupFailures: null,
+            warmupStartedAt: null,
+            warmupCompletedAt: null,
             residentCacheSmokePassed: cache.smokePassed,
             residentCacheSmokePage: cache.smokePage,
             residentCacheSmokeAt: cache.smokeAt,
@@ -498,7 +505,10 @@ var BilingualSync = {
         for (let attempt = 0; attempt < 30; attempt++) {
             win = this.getViewerWindow(reader);
             if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
-                this.ensureResidentPageCache(win, pdfPath);
+                if (!this.ensureResidentPageCache(win, pdfPath)) {
+                    await Zotero.Promise.delay(250);
+                    continue;
+                }
                 this.ensureSelectionWatcher(win);
                 this.ensureClickWatcher(win, pdfPath, map);
                 this.readyReaders.add(reader);
