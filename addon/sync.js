@@ -137,7 +137,8 @@ var BilingualSync = {
             preventedResets: cache.preventedResets,
             preventedDetailEvictions: cache.preventedDetailEvictions,
             explicitEvictions: cache.explicitEvictions,
-            cacheStrategy: "retain-visited-render-and-detail-states",
+            cacheStrategy: "retain-finished-page-and-detail-states",
+            retainedOnlyWhenFinished: true,
             warmupState: null,
             warmedPageCount: null,
             warmupPageTotal: null,
@@ -194,6 +195,7 @@ var BilingualSync = {
                     cache.enabled
                     && viewer.pdfDocument === cache.pdfDocument
                     && cache.retained.has(this.id)
+                    && this.renderingState === 3
                 ) {
                     if (cache.smokeMode) {
                         cache.smokeDestroyIntercepted = true;
@@ -220,6 +222,7 @@ var BilingualSync = {
                     && emptyReset
                     && viewer.pdfDocument === cache.pdfDocument
                     && cache.retained.has(this.id)
+                    && this.renderingState === 3
                 ) {
                     if (cache.smokeMode) cache.smokeResetIntercepted = true;
                     else {
@@ -228,10 +231,16 @@ var BilingualSync = {
                     }
                     return;
                 }
+                cache.retained.delete(this.id);
+                cache.protected.delete(this.id);
                 return originalReset.apply(this, args);
             };
             const wrappedDraw = typeof originalDraw === "function"
                 ? function (...args) {
+                    // A new draw must be free to cancel/reset until it reaches
+                    // FINISHED. Re-add it only after the draw promise resolves.
+                    cache.retained.delete(this.id);
+                    cache.protected.delete(this.id);
                     const result = originalDraw.apply(this, args);
                     Promise.resolve(result).then(
                         () => cache.touch?.(this.id),
@@ -252,6 +261,7 @@ var BilingualSync = {
                         && args[0] === null
                         && viewer.pdfDocument === cache.pdfDocument
                         && cache.retained.has(this.id)
+                        && this.renderingState === 3
                         && this.detailView
                     ) {
                         if (cache.smokeMode) cache.smokeDetailIntercepted = true;
@@ -285,9 +295,11 @@ var BilingualSync = {
             if (!cache.enabled) return;
             const pageView = viewer.getPageView(Number(pageNumber) - 1);
             if (!pageView) return;
-            const hasRenderedSurface = pageView.renderingState !== 0
-                || pageView.div?.hasAttribute?.("data-loaded")
-                || pageView.div?.querySelector?.("canvas");
+            const hasRenderedSurface = pageView.renderingState === 3
+                && (
+                    pageView.div?.hasAttribute?.("data-loaded")
+                    || pageView.div?.querySelector?.("canvas")
+                );
             if (!hasRenderedSurface) return;
             cache.retained.delete(pageView.id);
             cache.retained.set(pageView.id, pageView);
@@ -378,6 +390,7 @@ var BilingualSync = {
             preventedDetailEvictions: cache.preventedDetailEvictions,
             explicitEvictions: cache.explicitEvictions,
             detailCacheSmokePassed: cache.smokeDetailPassed,
+            retainedOnlyWhenFinished: true,
         });
         state.residentCache = cache;
         this.viewerState.set(win, state);
