@@ -194,11 +194,14 @@ var BilingualSync = {
     },
 
     async bootstrapOpenReaders() {
-        for (let attempt = 0; this.active && attempt < 40; attempt++) {
+        // Reader tabs can be opened long after Zotero starts. Keep a cheap
+        // watcher alive so every newly opened/reopened bilingual PDF receives
+        // the click handler even when renderToolbar is not emitted again.
+        while (this.active) {
             for (const reader of Zotero.Reader._readers || []) {
                 if (!this.readyReaders.has(reader)) await this.prepareSingleClick(reader);
             }
-            await Zotero.Promise.delay(500);
+            await Zotero.Promise.delay(750);
         }
     },
 
