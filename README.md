@@ -40,9 +40,7 @@ python scripts/build_xpi.py
 python -m venv .venv
 .venv/Scripts/pip install -r backend/requirements.txt
 .venv/Scripts/python backend/prepare_sidecar.py \
-  --original paper.pdf \
-  --translated paper.zh-CN.mono.pdf \
-  --compare paper.compare.pdf
+  --compare paper.LR_dual.pdf
 ```
 
 它会在 compare PDF 旁生成：
@@ -51,7 +49,9 @@ python -m venv .venv
 paper.compare.pdf.bilingual.json
 ```
 
-若输入是 `paper.LR_dual.pdf`，sidecar 将相应命名为
+新版直接读取最终双栏 PDF，自动判断英文/中文位于左侧还是右侧，并在
+段落内对齐句子；不再依赖中间 mono PDF 的坐标。若输入是
+`paper.LR_dual.pdf`，sidecar 将相应命名为
 `paper.LR_dual.pdf.bilingual.json`，插件会自动识别两种形式。
 
 如果你使用本地 PDF2zh Server，可在翻译结束后自动调用此命令；参考 [PDF2zh 自动集成](docs/pdf2zh-integration.md)。PDF2zh 插件会把 compare PDF 自动附加回原 Zotero 条目，本插件从本地服务器读取同名 sidecar。

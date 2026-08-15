@@ -32,6 +32,28 @@ def unit_rects(unit: dict) -> list[list[float]]:
     return unit.get("rects") or ([unit["box"]] if unit.get("box") else [])
 
 
+def merge_fragments(units: list[dict], language: str) -> list[dict]:
+    terminal = re.compile(r"[。！？!?]\s*$") if language == "zh" else re.compile(r"[.!?][\d,;:()\[\]–—\s]*$")
+    merged, current = [], None
+    for unit in units:
+        text, rects = clean(unit.get("text", "")), unit_rects(unit)
+        if not text or not rects:
+            continue
+        if current is None:
+            current = {"text": text, "rects": list(rects)}
+        else:
+            current["text"] = clean(current["text"] + " " + text)
+            current["rects"].extend(rects)
+        if terminal.search(current["text"]):
+            current["box"] = union_box(current["rects"])
+            merged.append(current)
+            current = None
+    if current is not None:
+        current["box"] = union_box(current["rects"])
+        merged.append(current)
+    return merged
+
+
 def column_for_box(box: list[float], page: dict, english: bool) -> int:
     offset = page["rightOffset"] if english else 0.0
     original_width = page["width"] - page["rightOffset"]
@@ -122,6 +144,12 @@ def align_units(en_units: list[dict], zh_units: list[dict], en_vectors: np.ndarr
         for j in range(m + 1):
             if not math.isfinite(costs[i][j]):
                 continue
+            if i < n and costs[i][j] + 0.85 < costs[i + 1][j]:
+                costs[i + 1][j] = costs[i][j] + 0.85
+                previous[i + 1][j] = (i, j, 1, 0, -1.0)
+            if j < m and costs[i][j] + 0.85 < costs[i][j + 1]:
+                costs[i][j + 1] = costs[i][j] + 0.85
+                previous[i][j + 1] = (i, j, 0, 1, -1.0)
             for en_count in range(1, min(max_group, n - i) + 1):
                 en_text = clean(" ".join(unit["text"] for unit in en_units[i:i + en_count]))
                 en_vector = group_vector(en_vectors, i, en_count)
@@ -180,6 +208,8 @@ def align_units(en_units: list[dict], zh_units: list[dict], en_vectors: np.ndarr
 
     pairs = []
     for pair_index, (en_start, en_end, zh_start, zh_end, similarity) in enumerate(steps):
+        if en_start == en_end or zh_start == zh_end:
+            continue
         en_group = en_units[en_start:en_end]
         zh_group = zh_units[zh_start:zh_end]
         en_rects = [rect for unit in en_group for rect in unit["rects"]]
@@ -202,6 +232,37 @@ def realign(base_map: Path, output: Path, model_name: str, cache_dir: Path) -> d
     model = TextEmbedding(model_name, cache_dir=str(cache_dir))
     new_segments = []
     semantic_scores = []
+    if payload.get("layout", {}).get("source") == "final-dual":
+        prepared, all_texts = [], []
+        for segment in payload.get("segments", []):
+            pairs = [dict(pair) for pair in segment.get("sentencePairs", [])]
+            for pair in pairs:
+                all_texts.extend((pair["enText"], pair["zhText"]))
+            prepared.append((segment, pairs))
+        all_vectors = np.asarray(list(model.embed(all_texts)), dtype=np.float32)
+        all_vectors /= np.maximum(np.linalg.norm(all_vectors, axis=1, keepdims=True), 1e-12)
+        vector_index = 0
+        for segment, pairs in prepared:
+            for pair in pairs:
+                similarity = float(np.dot(all_vectors[vector_index], all_vectors[vector_index + 1]))
+                pair["semanticScore"] = round(similarity, 4)
+                semantic_scores.append(pair["semanticScore"])
+                vector_index += 2
+            updated = dict(segment)
+            updated["sentencePairs"] = pairs
+            new_segments.append(updated)
+        payload["version"] = 4
+        payload["alignment"] = {"method": "final-dual-paragraph-length-dp-with-semantic-validation", "model": model_name, "baseMap": base_map.name}
+        payload["segments"] = new_segments
+        payload["stats"] = {
+            **payload.get("stats", {}), "semanticParagraphs": len(new_segments),
+            "semanticSentencePairs": sum(len(segment["sentencePairs"]) for segment in new_segments),
+            "semanticScoreMean": round(float(np.mean(semantic_scores)), 4) if semantic_scores else None,
+            "semanticScoreMedian": round(float(np.median(semantic_scores)), 4) if semantic_scores else None,
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return payload["stats"]
     for page in payload["pages"]:
         page_index = int(page["pageIndex"])
         page_segments = [segment for segment in payload["segments"] if int(segment["pageIndex"]) == page_index]

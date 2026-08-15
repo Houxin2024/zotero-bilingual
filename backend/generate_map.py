@@ -75,21 +75,30 @@ def sentence_units(chars: list[dict], language: str) -> list[dict]:
             if char == ".":
                 prefix = clean_text("".join(entry["c"] for entry in current)).lower()
                 is_abbreviation = any(prefix.endswith(value) for value in abbreviations)
+                previous_nonspace = ""
+                for preceding in reversed(current[:-1]):
+                    if preceding["c"].strip():
+                        previous_nonspace = preceding["c"]
+                        break
                 next_nonspace = ""
                 for following in chars[index + 1:]:
                     if following["c"].strip():
                         next_nonspace = following["c"]
                         break
-                terminal = not is_abbreviation and (not next_nonspace or next_nonspace.isupper() or next_nonspace.isdigit() or next_nonspace in "([")
-        if terminal and len(clean_text("".join(entry["c"] for entry in current))) >= 12:
+                is_decimal = previous_nonspace.isdigit() and next_nonspace.isdigit()
+                terminal = not is_abbreviation and not is_decimal and (
+                    not next_nonspace or next_nonspace.isupper() or next_nonspace in "(["
+                )
+        minimum_length = 1 if language == "zh" else 8
+        if terminal and len(clean_text("".join(entry["c"] for entry in current))) >= minimum_length:
             flush()
     flush()
     return units
 
 
-def extract_blocks(page: pymupdf.Page, language: str) -> list[dict]:
+def extract_blocks(page: pymupdf.Page, language: str, clip: pymupdf.Rect | None = None) -> list[dict]:
     result: list[dict] = []
-    raw = page.get_text("rawdict", sort=True)
+    raw = page.get_text("rawdict", sort=True, clip=clip)
     for block in raw.get("blocks", []):
         if block.get("type") != 0:
             continue
@@ -114,6 +123,78 @@ def extract_blocks(page: pymupdf.Page, language: str) -> list[dict]:
             "sentences": sentence_units(chars, language),
         })
     return result
+
+
+def language_for_text(text: str) -> str:
+    latin = len(re.findall(r"[A-Za-z]", text))
+    cjk = len(re.findall(r"[\u3400-\u9fff]", text))
+    return "zh" if cjk > latin * 0.35 else "en"
+
+
+def direct_spatial_cost(source: dict, target: dict, page_width: float, page_height: float, source_offset: float, target_offset: float) -> float:
+    sx0, sy0, sx1, sy1 = source["box"]
+    tx0, ty0, tx1, ty1 = target["box"]
+    scx = (sx0 + sx1) / 2 - source_offset
+    tcx = (tx0 + tx1) / 2 - target_offset
+    scy, tcy = (sy0 + sy1) / 2, (ty0 + ty1) / 2
+    overlap = max(0.0, min(sy1, ty1) - max(sy0, ty0))
+    overlap_ratio = overlap / max(1.0, min(sy1 - sy0, ty1 - ty0))
+    source_column = 2 if (sx1 - sx0) > page_width * 0.48 else int(scx >= page_width / 2)
+    target_column = 2 if (tx1 - tx0) > page_width * 0.48 else int(tcx >= page_width / 2)
+    column_penalty = 0.0 if 2 in (source_column, target_column) or source_column == target_column else 0.9
+    return 3.4 * abs(scy - tcy) / max(page_height, 1.0) + 0.35 * abs(scx - tcx) / max(page_width, 1.0) + column_penalty - 1.25 * overlap_ratio
+
+
+def align_direct_page(en_blocks: list[dict], zh_blocks: list[dict], page_height: float, page_width: float, page_index: int, en_offset: float, zh_offset: float) -> list[dict]:
+    assignments: list[list[dict]] = [[] for _ in en_blocks]
+    for zh in zh_blocks:
+        if en_blocks:
+            best_index = min(range(len(en_blocks)), key=lambda index: direct_spatial_cost(zh, en_blocks[index], page_width, page_height, zh_offset, en_offset))
+            assignments[best_index].append(zh)
+    rows = []
+    for index, en in enumerate(en_blocks):
+        matched = sorted(assignments[index], key=lambda block: (block["box"][1], block["box"][0]))
+        if not matched:
+            continue
+        en_sentences = transform_sentences(en["sentences"], page_height)
+        zh_sentences = transform_sentences([unit for block in matched for unit in block["sentences"]], page_height)
+        zh_boxes = [block["box"] for block in matched]
+        rows.append({
+            "id": f"p{page_index + 1}-b{index}", "pageIndex": page_index,
+            "en": en["text"], "zh": clean_text(" ".join(block["text"] for block in matched)),
+            "enBox": rounded(to_pdf_box(en["box"], page_height)),
+            "zhBox": rounded(to_pdf_box(union_box(zh_boxes), page_height)),
+            "enSentences": en_sentences, "zhSentences": zh_sentences,
+            "sentencePairs": align_sentence_units(en_sentences, zh_sentences),
+        })
+    return rows
+
+
+def generate_direct_dual_map(compare_path: str, output_path: str) -> dict:
+    compare = pymupdf.open(compare_path)
+    pages, segments = [], []
+    for page_index, page in enumerate(compare):
+        half_width = page.rect.width / 2
+        left_clip = pymupdf.Rect(0, 0, half_width, page.rect.height)
+        right_clip = pymupdf.Rect(half_width, 0, page.rect.width, page.rect.height)
+        left_language = language_for_text(clean_text(page.get_text("text", clip=left_clip)))
+        right_language = language_for_text(clean_text(page.get_text("text", clip=right_clip)))
+        if left_language == right_language:
+            left_language, right_language = "en", "zh"
+        en_clip, en_offset = (left_clip, 0.0) if left_language == "en" else (right_clip, half_width)
+        zh_clip, zh_offset = (left_clip, 0.0) if left_language == "zh" else (right_clip, half_width)
+        pages.append({"pageIndex": page_index, "width": round(page.rect.width, 2), "height": round(page.rect.height, 2), "rightOffset": round(half_width, 2), "leftLanguage": left_language, "rightLanguage": right_language})
+        segments.extend(align_direct_page(extract_blocks(page, "en", en_clip), extract_blocks(page, "zh", zh_clip), page.rect.height, half_width, page_index, en_offset, zh_offset))
+    payload = {
+        "version": 4, "compareFile": Path(compare_path).name,
+        "layout": {"source": "final-dual", "languageDetection": "unicode-majority"},
+        "pages": pages, "segments": segments,
+        "stats": {"pages": compare.page_count, "pairedParagraphs": len(segments), "englishSentences": sum(len(row["enSentences"]) for row in segments), "chineseSentences": sum(len(row["zhSentences"]) for row in segments), "explicitSentencePairs": sum(len(row["sentencePairs"]) for row in segments)},
+    }
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return payload
 
 
 def column_index(box: list[float], width: float) -> int:
@@ -188,9 +269,12 @@ def align_sentence_units(en_units: list[dict], zh_units: list[dict]) -> list[dic
         groups = [(index, index + 1, index, index + 1) for index in range(n)]
     else:
         groups = None
-    total_en = sum(max(len(clean_text(unit["text"])), 1) for unit in en_units)
-    total_zh = sum(max(len(clean_text(unit["text"])), 1) for unit in zh_units)
-    expected_ratio = max(0.18, min(1.5, total_zh / max(total_en, 1)))
+    prefix_ratios = sorted(
+        len(clean_text(zh_units[index]["text"])) / max(len(clean_text(en_units[index]["text"])), 1)
+        for index in range(min(n, m))
+    )
+    expected_ratio = prefix_ratios[len(prefix_ratios) // 2] if prefix_ratios else 0.45
+    expected_ratio = max(0.18, min(1.5, expected_ratio))
     if groups is None:
         infinity = float("inf")
         costs = [[infinity] * (m + 1) for _ in range(n + 1)]
@@ -214,11 +298,19 @@ def align_sentence_units(en_units: list[dict], zh_units: list[dict]) -> list[dic
                         if new_cost < costs[ni][nj]:
                             costs[ni][nj] = new_cost
                             previous[ni][nj] = (i, j, en_count, zh_count)
-        if previous[n][m] is None:
+        end_candidates = []
+        for j in range(1, m + 1):
+            if math.isfinite(costs[n][j]):
+                end_candidates.append((costs[n][j] + 0.35 * (m - j), n, j))
+        for i in range(1, n + 1):
+            if math.isfinite(costs[i][m]):
+                end_candidates.append((costs[i][m] + 0.35 * (n - i), i, m))
+        _, end_i, end_j = min(end_candidates, default=(infinity, n, m))
+        if previous[end_i][end_j] is None:
             groups = [(0, n, 0, m)]
         else:
             groups = []
-            i, j = n, m
+            i, j = end_i, end_j
             while i or j:
                 step = previous[i][j]
                 if step is None:
@@ -331,12 +423,18 @@ def generate_map(original_path: str, translated_path: str, compare_path: str, ou
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--original", required=True)
-    parser.add_argument("--translated", required=True)
+    parser.add_argument("--original")
+    parser.add_argument("--translated")
     parser.add_argument("--compare", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--direct-dual", action="store_true")
     args = parser.parse_args()
-    payload = generate_map(args.original, args.translated, args.compare, args.output)
+    if args.direct_dual:
+        payload = generate_direct_dual_map(args.compare, args.output)
+    else:
+        if not args.original or not args.translated:
+            parser.error("--original and --translated are required unless --direct-dual is used")
+        payload = generate_map(args.original, args.translated, args.compare, args.output)
     print(json.dumps(payload["stats"], ensure_ascii=False))
 
 

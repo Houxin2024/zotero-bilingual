@@ -10,14 +10,14 @@
 subprocess.run([
     align_python,
     "backend/prepare_sidecar.py",
-    "--original", original_pdf,
-    "--translated", mono_pdf,
     "--compare", compare_pdf,
     "--output", compare_pdf + ".bilingual.json",
 ], check=True, timeout=600)
 ```
 
-后处理失败不应把 PDF 翻译标记为失败。`prepare_sidecar.py` 的语义阶段失败时会自动保留 geometry v2 sidecar，因此插件仍可使用基础联动。
+后处理失败不应把 PDF 翻译标记为失败。新版从最终双栏 PDF 直接提取
+左右语言、句子和坐标，并生成 v4 sidecar；语义评分失败时仍会保留
+最终版面几何句对。
 
 ## 不修改 PDF2zh 源码的方式
 

@@ -369,11 +369,14 @@ var BilingualSync = {
         if (!page) return null;
         const selection = this.unionRects(selectionRects);
         const isLeft = ((selection[0] + selection[2]) / 2) < page.rightOffset;
+        const leftLanguage = page.leftLanguage || "zh";
+        const sourceLanguage = isLeft ? leftLanguage : (leftLanguage === "en" ? "zh" : "en");
+        const sourceIsZh = sourceLanguage === "zh";
         const segments = index.segments.get(pageIndex) || [];
         let best = null;
         let bestScore = -Infinity;
         for (const segment of segments) {
-            const sourceBox = isLeft ? segment.zhBox : segment.enBox;
+            const sourceBox = sourceIsZh ? segment.zhBox : segment.enBox;
             const score = this.candidateScore(selection, sourceBox);
             if (score > bestScore) {
                 best = segment;
@@ -386,7 +389,7 @@ var BilingualSync = {
             let bestPairScore = -Infinity;
             for (const pair of best.sentencePairs) {
                 if (!this.isProsePair(pair)) continue;
-                const sourceRects = isLeft ? pair.zhRects : pair.enRects;
+                const sourceRects = sourceIsZh ? pair.zhRects : pair.enRects;
                 const score = this.rectSetScore(selectionRects, sourceRects);
                 if (score > bestPairScore) {
                     bestPair = pair;
@@ -395,25 +398,25 @@ var BilingualSync = {
             }
             if (bestPair && bestPairScore > 0.25) {
                 return {
-                    sourceRects: isLeft ? bestPair.zhRects : bestPair.enRects,
-                    rects: isLeft ? bestPair.enRects : bestPair.zhRects,
-                    sourceText: isLeft ? bestPair.zhText : bestPair.enText,
-                    targetText: isLeft ? bestPair.enText : bestPair.zhText,
-                    direction: isLeft ? "中→英" : "英→中",
+                    sourceRects: sourceIsZh ? bestPair.zhRects : bestPair.enRects,
+                    rects: sourceIsZh ? bestPair.enRects : bestPair.zhRects,
+                    sourceText: sourceIsZh ? bestPair.zhText : bestPair.enText,
+                    targetText: sourceIsZh ? bestPair.enText : bestPair.zhText,
+                    direction: sourceIsZh ? "中→英" : "英→中",
                     matchScore: Math.round(bestPairScore * 1000) / 1000,
                     mapVersion: map.version,
                 };
             }
             if (map.version >= 3) return null;
         }
-        const sourceUnits = isLeft ? best.zhSentences : best.enSentences;
-        const targetUnits = isLeft ? best.enSentences : best.zhSentences;
+        const sourceUnits = sourceIsZh ? best.zhSentences : best.enSentences;
+        const targetUnits = sourceIsZh ? best.enSentences : best.zhSentences;
         const sourceIndex = this.bestUnitIndex(selection, sourceUnits);
         const targetUnit = this.correspondingUnit(sourceIndex, sourceUnits, targetUnits);
         return {
             sourceRects: sourceUnits[sourceIndex]?.rects || (sourceUnits[sourceIndex]?.box ? [sourceUnits[sourceIndex].box] : []),
-            rects: targetUnit?.box ? [targetUnit.box] : [isLeft ? best.enBox : best.zhBox],
-            direction: isLeft ? "中→英" : "英→中",
+            rects: targetUnit?.box ? [targetUnit.box] : [sourceIsZh ? best.enBox : best.zhBox],
+            direction: sourceIsZh ? "中→英" : "英→中",
             mapVersion: map.version || 1,
         };
     },
