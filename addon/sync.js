@@ -567,8 +567,9 @@ var BilingualSync = {
             : response.response;
     },
 
-    async loadMap(pdfPath) {
-        if (this.mapCache.has(pdfPath)) return this.mapCache.get(pdfPath);
+    async loadMap(pdfPath, forceRefresh = false) {
+        const cached = this.mapCache.get(pdfPath) || null;
+        if (cached && !forceRefresh) return cached;
         const basename = pdfPath.replace(/^.*[\\/]/, "");
         const candidates = [pdfPath + ".bilingual.json"];
         const mapDirectory = String(
@@ -601,7 +602,7 @@ var BilingualSync = {
         catch (error) {
             // A map may appear after translation finishes, so do not cache misses.
         }
-        return null;
+        return cached;
     },
 
     clearOverlay(win) {
@@ -820,10 +821,22 @@ var BilingualSync = {
             position.pdfX + 0.8,
             position.pdfY + 0.8,
         ];
-        const target = this.findTarget(map, position.pageIndex, [pointRect]);
+        let activeMap = this.mapCache.get(pdfPath) || map;
+        let target = this.findTarget(activeMap, position.pageIndex, [pointRect]);
+        const pageSegments = activeMap.__bilingualIndex?.segments?.get(position.pageIndex) || [];
+        const state = this.viewerState.get(win) || {};
+        if (!target && pdfPath && pageSegments.length === 0 && Date.now() - (state.lastMapRefreshAt || 0) > 3000) {
+            state.lastMapRefreshAt = Date.now();
+            this.viewerState.set(win, state);
+            const refreshed = await this.loadMap(pdfPath, true);
+            if (refreshed) {
+                activeMap = refreshed;
+                target = this.findTarget(activeMap, position.pageIndex, [pointRect]);
+            }
+        }
         this.clearOverlay(win);
         if (!target) {
-            await this.writeStatus?.({ state: "click-no-sentence", lastClickAt: new Date().toISOString(), page: position.pageIndex + 1, mapVersion: map.version });
+            await this.writeStatus?.({ state: "click-no-sentence", lastClickAt: new Date().toISOString(), page: position.pageIndex + 1, mapVersion: activeMap.version });
             return;
         }
         this.drawOverlay(win, position.pageIndex, target.sourceRects || [], "source");

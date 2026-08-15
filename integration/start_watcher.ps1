@@ -27,7 +27,7 @@ $arguments = @(
     "--cache-dir", $CacheDir,
     "--status", $StatusPath,
     "--poll-seconds", "2",
-    "--stable-seconds", "4"
+    "--stable-seconds", "12"
 )
 Start-Process -FilePath "wsl.exe" -ArgumentList $arguments -WindowStyle Hidden | Out-Null
 

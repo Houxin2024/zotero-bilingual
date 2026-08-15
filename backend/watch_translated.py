@@ -18,6 +18,10 @@ SUPPORTED_SUFFIXES = (".compare.pdf", ".lr_dual.pdf", ".dual.pdf")
 EXCLUDED_MARKERS = (".tb_dual.pdf", ".mono.pdf", "crop-compare")
 
 
+class SourceChangedDuringBuild(RuntimeError):
+    """The translator was still writing the PDF while its map was built."""
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -127,6 +131,7 @@ class SidecarWatcher:
         building = Path(str(sidecar) + ".building")
         building.unlink(missing_ok=True)
         self.write_status(state="processing", currentFile=pdf.name, lastStartedAt=utc_now())
+        before = pdf.stat()
         result = prepare(
             None,
             None,
@@ -137,6 +142,19 @@ class SidecarWatcher:
             False,
             True,
         )
+        after = pdf.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            building.unlink(missing_ok=True)
+            self.failures.pop(pdf, None)
+            self.observations[pdf] = Observation(
+                after.st_size,
+                after.st_mtime_ns,
+                time.monotonic(),
+            )
+            raise SourceChangedDuringBuild(
+                f"{pdf.name} changed while its sentence map was being built; "
+                "waiting for the completed PDF"
+            )
         payload = read_valid_map(building, pdf)
         if payload is None:
             building.unlink(missing_ok=True)
@@ -164,6 +182,13 @@ class SidecarWatcher:
         for pdf in ready:
             try:
                 self.process(pdf)
+            except SourceChangedDuringBuild as error:
+                self.write_status(
+                    state="waiting-stable",
+                    currentFile=None,
+                    lastDeferredFile=pdf.name,
+                    lastDeferredReason=str(error),
+                )
             except Exception as error:
                 attempts = self.failures.get(pdf, (0, 0.0))[0] + 1
                 delay = min(300.0, 5.0 * (2 ** min(attempts - 1, 6)))
@@ -188,7 +213,7 @@ def main() -> None:
     parser.add_argument("--status", type=Path, required=True)
     parser.add_argument("--model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
-    parser.add_argument("--stable-seconds", type=float, default=4.0)
+    parser.add_argument("--stable-seconds", type=float, default=12.0)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     args.translated_dir.mkdir(parents=True, exist_ok=True)
