@@ -5,12 +5,15 @@ var BilingualSync = {
     mapCache: new Map(),
     viewerState: new WeakMap(),
     readyReaders: new WeakSet(),
+    ignoredReaders: new WeakSet(),
+    mapRetry: new WeakMap(),
     handler: null,
     toolbarHandler: null,
     active: false,
 
     async start() {
         this.active = true;
+        this.configurePDF2zhForLinkedReading();
         this.handler = (event) => {
             this.handleSelection(event).catch(error => {
                 Zotero.logError(error);
@@ -32,6 +35,20 @@ var BilingualSync = {
         });
     },
 
+    configurePDF2zhForLinkedReading() {
+        const preferences = {
+            "extensions.zotero.pdf2zh.noMono": true,
+            "extensions.zotero.pdf2zh.mono": false,
+            "extensions.zotero.pdf2zh.noDual": false,
+            "extensions.zotero.pdf2zh.dual": true,
+            "extensions.zotero.pdf2zh.dualMode": "LR",
+            "extensions.zotero.pdf2zh.dual-open": true,
+        };
+        for (const [key, value] of Object.entries(preferences)) {
+            Zotero.Prefs.set(key, value, true);
+        }
+    },
+
     stop() {
         this.active = false;
         if (this.handler) {
@@ -44,6 +61,8 @@ var BilingualSync = {
         this.toolbarHandler = null;
         this.mapCache.clear();
         this.readyReaders = new WeakSet();
+        this.ignoredReaders = new WeakSet();
+        this.mapRetry = new WeakMap();
     },
 
     getViewerWindow(reader) {
@@ -173,13 +192,24 @@ var BilingualSync = {
     },
 
     async prepareSingleClick(reader) {
-        if (!reader) return;
+        if (!reader || this.ignoredReaders.has(reader)) return;
+        const retry = this.mapRetry.get(reader);
+        if (retry?.at > Date.now()) return;
         const pdfPath = await this.getAttachmentPath(reader);
         if (!pdfPath) return;
         const label = pdfPath + " " + (reader?._item?.getField?.("title") || "");
-        if (!/(compare|dual)/i.test(label)) return;
+        if (!/(compare|dual)/i.test(label)) {
+            this.ignoredReaders.add(reader);
+            return;
+        }
         const map = await this.loadMap(pdfPath);
-        if (!map) return;
+        if (!map) {
+            const attempts = (retry?.attempts || 0) + 1;
+            const delay = Math.min(30000, 1000 * (2 ** Math.min(attempts - 1, 5)));
+            this.mapRetry.set(reader, { attempts, at: Date.now() + delay });
+            return;
+        }
+        this.mapRetry.delete(reader);
         for (let attempt = 0; attempt < 30; attempt++) {
             const win = this.getViewerWindow(reader);
             if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
@@ -199,7 +229,9 @@ var BilingualSync = {
         // the click handler even when renderToolbar is not emitted again.
         while (this.active) {
             for (const reader of Zotero.Reader._readers || []) {
-                if (!this.readyReaders.has(reader)) await this.prepareSingleClick(reader);
+                if (!this.readyReaders.has(reader) && !this.ignoredReaders.has(reader)) {
+                    await this.prepareSingleClick(reader);
+                }
             }
             await Zotero.Promise.delay(750);
         }

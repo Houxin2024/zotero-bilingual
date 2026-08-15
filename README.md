@@ -13,6 +13,16 @@
 - 与 Zotero PDF2zh 的 compare PDF 配合；新论文无需写死文件名。
 - 映射只读入一次，并按页建立索引；点击时不写磁盘。
 - PDF、翻译文本和 API Key 均不上传到插件作者服务器。
+- 可选后台 watcher 持续识别 PDF2zh 的 `dual/LR_dual/compare` 输出，等待文件写稳后原子生成映射。
+- Zotero 晚启动、PDF 晚打开或后台映射稍后完成都能自动恢复，无需重装插件。
+
+## 日常使用（配置一次后）
+
+1. 在 Zotero 选中原论文或其 PDF。
+2. 右键 → `PDF2zh` → 翻译。
+3. 双栏 PDF 自动附加回原条目并打开；映射在后台完成后，直接单击任一句即可联动。
+
+日常不需要运行 Python、不需要移动 PDF，也不需要为新论文重新安装插件。
 
 ## 安装插件
 
@@ -54,7 +64,7 @@ paper.compare.pdf.bilingual.json
 `paper.LR_dual.pdf`，sidecar 将相应命名为
 `paper.LR_dual.pdf.bilingual.json`，插件会自动识别两种形式。
 
-如果你使用本地 PDF2zh Server，可在翻译结束后自动调用此命令；参考 [PDF2zh 自动集成](docs/pdf2zh-integration.md)。PDF2zh 插件会把 compare PDF 自动附加回原 Zotero 条目，本插件从本地服务器读取同名 sidecar。
+如果你使用本地 PDF2zh Server，推荐启动持久 watcher；参考 [PDF2zh 自动集成](docs/pdf2zh-integration.md)。PDF2zh 插件会把双栏 PDF 自动附加回原 Zotero 条目，本插件从本地服务器读取同名 sidecar。
 
 ## 映射发现顺序
 
@@ -66,16 +76,20 @@ paper.compare.pdf.bilingual.json
 
 默认服务器地址是 `http://127.0.0.1:8890`，也会兼容 PDF2zh 已配置的服务器地址。
 
-## 仅升级已有映射
+## 持续处理新论文
 
-已有 PDF2zh geometry v2 sidecar 时，可批量升级：
+下面的进程同时覆盖新生成的 `.dual.pdf`、`.LR_dual.pdf` 和 `.compare.pdf`：
 
 ```bash
-.venv/Scripts/python backend/upgrade_folder.py \
-  --translated-dir path/to/pdf2zh/server/translated
+.venv/Scripts/python backend/watch_translated.py \
+  --translated-dir path/to/pdf2zh/server/translated \
+  --cache-dir path/to/model-cache \
+  --status path/to/automation-status.json
 ```
 
-加 `--watch` 可持续监听新论文。
+它会等待 PDF 大小和修改时间稳定、使用临时文件生成映射、成功后原子替换；失败会记录状态并指数退避重试。重复启动或重复扫描不会重做仍然有效的映射。
+
+Windows 可调用 `integration/start_watcher.ps1`。本机 PDF2zh 启动脚本只需调用它一次，之后重启服务器也会自动恢复 watcher。
 
 ## 隐私与开源边界
 
