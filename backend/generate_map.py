@@ -104,9 +104,21 @@ def extract_blocks(page: pymupdf.Page, language: str, clip: pymupdf.Rect | None 
             continue
         chars: list[dict] = []
         lines = block.get("lines", [])
+        vertical_chars = 0
+        horizontal_chars = 0
         for line_index, line in enumerate(lines):
             if line_index:
                 chars.append({"c": " ", "box": None, "line": line_index})
+            direction = line.get("dir") or (1.0, 0.0)
+            line_chars = sum(
+                bool(char.get("c", "").strip())
+                for span in line.get("spans", [])
+                for char in span.get("chars", [])
+            )
+            if abs(float(direction[1])) > abs(float(direction[0])):
+                vertical_chars += line_chars
+            else:
+                horizontal_chars += line_chars
             for span in line.get("spans", []):
                 for char in span.get("chars", []):
                     chars.append({
@@ -121,6 +133,7 @@ def extract_blocks(page: pymupdf.Page, language: str, clip: pymupdf.Rect | None 
             "text": text,
             "box": [float(value) for value in block["bbox"]],
             "sentences": sentence_units(chars, language),
+            "orientation": "vertical" if vertical_chars > horizontal_chars else "horizontal",
         })
     return result
 
@@ -142,7 +155,8 @@ def direct_spatial_cost(source: dict, target: dict, page_width: float, page_heig
     source_column = 2 if (sx1 - sx0) > page_width * 0.48 else int(scx >= page_width / 2)
     target_column = 2 if (tx1 - tx0) > page_width * 0.48 else int(tcx >= page_width / 2)
     column_penalty = 0.0 if 2 in (source_column, target_column) or source_column == target_column else 0.9
-    return 3.4 * abs(scy - tcy) / max(page_height, 1.0) + 0.35 * abs(scx - tcx) / max(page_width, 1.0) + column_penalty - 1.25 * overlap_ratio
+    orientation_penalty = 5.0 if source.get("orientation") != target.get("orientation") else 0.0
+    return orientation_penalty + 3.4 * abs(scy - tcy) / max(page_height, 1.0) + 0.35 * abs(scx - tcx) / max(page_width, 1.0) + column_penalty - 1.25 * overlap_ratio
 
 
 def align_direct_page(en_blocks: list[dict], zh_blocks: list[dict], page_height: float, page_width: float, page_index: int, en_offset: float, zh_offset: float) -> list[dict]:

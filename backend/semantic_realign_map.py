@@ -155,6 +155,13 @@ def align_units(en_units: list[dict], zh_units: list[dict], en_vectors: np.ndarr
                 en_vector = group_vector(en_vectors, i, en_count)
                 en_length = lexical_length(en_text, "en")
                 for zh_count in range(1, min(max_group, m - j) + 1):
+                    # A 2-to-2 or 3-to-3 transition hides several otherwise
+                    # valid sentence links inside one large highlight.  Real
+                    # translation divergence only needs 1-to-many or
+                    # many-to-1 transitions, so keep equal-count neighbours
+                    # independently selectable.
+                    if en_count > 1 and zh_count > 1:
+                        continue
                     zh_text = clean(" ".join(unit["text"] for unit in zh_units[j:j + zh_count]))
                     zh_vector = group_vector(zh_vectors, j, zh_count)
                     similarity = float(np.dot(en_vector, zh_vector))
@@ -235,24 +242,26 @@ def realign(base_map: Path, output: Path, model_name: str, cache_dir: Path) -> d
     if payload.get("layout", {}).get("source") == "final-dual":
         prepared, all_texts = [], []
         for segment in payload.get("segments", []):
-            pairs = [dict(pair) for pair in segment.get("sentencePairs", [])]
-            for pair in pairs:
-                all_texts.extend((pair["enText"], pair["zhText"]))
-            prepared.append((segment, pairs))
+            en_units = merge_fragments(segment.get("enSentences", []), "en")
+            zh_units = merge_fragments(segment.get("zhSentences", []), "zh")
+            all_texts.extend(unit["text"] for unit in en_units)
+            all_texts.extend(unit["text"] for unit in zh_units)
+            prepared.append((segment, en_units, zh_units))
         all_vectors = np.asarray(list(model.embed(all_texts)), dtype=np.float32)
         all_vectors /= np.maximum(np.linalg.norm(all_vectors, axis=1, keepdims=True), 1e-12)
         vector_index = 0
-        for segment, pairs in prepared:
-            for pair in pairs:
-                similarity = float(np.dot(all_vectors[vector_index], all_vectors[vector_index + 1]))
-                pair["semanticScore"] = round(similarity, 4)
-                semantic_scores.append(pair["semanticScore"])
-                vector_index += 2
+        for segment, en_units, zh_units in prepared:
+            en_vectors = all_vectors[vector_index:vector_index + len(en_units)]
+            vector_index += len(en_units)
+            zh_vectors = all_vectors[vector_index:vector_index + len(zh_units)]
+            vector_index += len(zh_units)
+            pairs = align_units(en_units, zh_units, en_vectors, zh_vectors)
+            semantic_scores.extend(pair["semanticScore"] for pair in pairs)
             updated = dict(segment)
             updated["sentencePairs"] = pairs
             new_segments.append(updated)
         payload["version"] = 4
-        payload["alignment"] = {"method": "final-dual-paragraph-length-dp-with-semantic-validation", "model": model_name, "baseMap": base_map.name}
+        payload["alignment"] = {"method": "final-dual-orientation-aware-paragraph-and-semantic-sentence-dp", "model": model_name, "baseMap": base_map.name}
         payload["segments"] = new_segments
         payload["stats"] = {
             **payload.get("stats", {}), "semanticParagraphs": len(new_segments),
