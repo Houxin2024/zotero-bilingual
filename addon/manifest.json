@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Bilingual PDF Linked Reader",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Instant linked sentence highlighting for side-by-side bilingual PDFs in Zotero.",
   "author": "Houxin2024",
   "homepage_url": "https://github.com/Houxin2024/zotero-bilingual-linked-reader",

@@ -186,6 +186,7 @@ var BilingualSync = {
                 this.ensureSelectionWatcher(win);
                 this.ensureClickWatcher(win, pdfPath, map);
                 this.readyReaders.add(reader);
+                await this.runSingleClickSmokeTest(win, map);
                 return;
             }
             await Zotero.Promise.delay(250);
@@ -207,7 +208,7 @@ var BilingualSync = {
         const ignoredTarget = target => target?.closest?.(
             "a,button,input,textarea,select,[role='button'],.toolbar,.annotationEditorLayer",
         );
-        const onClick = event => {
+        const dispatchClick = event => {
             if (event.button !== 0 || event.detail !== 1 || ignoredTarget(event.target)) return;
             const click = {
                 clientX: event.clientX,
@@ -224,6 +225,24 @@ var BilingualSync = {
                 });
             });
         };
+        const onPointerDown = event => {
+            if (event.button !== 0 || ignoredTarget(event.target)) return;
+            state.pointerDown = { clientX: event.clientX, clientY: event.clientY, target: event.target, at: Date.now() };
+        };
+        const onPointerUp = event => {
+            const start = state.pointerDown;
+            state.pointerDown = null;
+            if (!start || event.button !== 0 || ignoredTarget(event.target)) return;
+            const moved = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY);
+            if (moved > 7 || Date.now() - start.at > 850) return;
+            state.pointerUpCount = (state.pointerUpCount || 0) + 1;
+            state.lastPointerLinkedAt = Date.now();
+            dispatchClick({ button: 0, detail: 1, clientX: event.clientX, clientY: event.clientY, target: event.target || start.target });
+        };
+        const onClick = event => {
+            if (Date.now() - (state.lastPointerLinkedAt || 0) < 250) return;
+            dispatchClick(event);
+        };
         const onDoubleClick = () => {
             if (state.clickFrame) {
                 win.cancelAnimationFrame(state.clickFrame);
@@ -231,11 +250,48 @@ var BilingualSync = {
             }
             this.clearOverlay(win);
         };
+        win.document.addEventListener("pointerdown", onPointerDown, true);
+        win.document.addEventListener("pointerup", onPointerUp, true);
         win.document.addEventListener("click", onClick, true);
         win.document.addEventListener("dblclick", onDoubleClick, true);
+        state.onPointerDown = onPointerDown;
+        state.onPointerUp = onPointerUp;
         state.onClick = onClick;
         state.onDoubleClick = onDoubleClick;
         this.viewerState.set(win, state);
+    },
+
+    async runSingleClickSmokeTest(win, map) {
+        const state = this.viewerState.get(win) || {};
+        if (state.smokeTested) return;
+        state.smokeTested = true;
+        this.viewerState.set(win, state);
+        const page = map.pages?.[0];
+        const firstPair = (map.segments || [])
+            .filter(segment => Number(segment.pageIndex) === 0)
+            .flatMap(segment => segment.sentencePairs || [])
+            .find(pair => this.isProsePair(pair));
+        if (!page || !firstPair) return;
+        const rect = (page.leftLanguage === "en" ? firstPair.enRects : firstPair.zhRects)?.[0];
+        if (!rect) return;
+        for (let attempt = 0; attempt < 20; attempt++) {
+            const pageView = win.PDFViewerApplication?.pdfViewer?.getPageView(0);
+            const bounds = pageView?.div?.getBoundingClientRect?.();
+            if (pageView?.viewport && bounds?.width && bounds?.height) {
+                const [viewportX, viewportY] = pageView.viewport.convertToViewportPoint((rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2);
+                const clientX = bounds.left + viewportX * bounds.width / pageView.viewport.width;
+                const clientY = bounds.top + viewportY * bounds.height / pageView.viewport.height;
+                const target = win.document.elementFromPoint(clientX, clientY) || pageView.div;
+                const EventType = win.PointerEvent || win.MouseEvent;
+                target.dispatchEvent(new EventType("pointerdown", { bubbles: true, button: 0, clientX, clientY }));
+                target.dispatchEvent(new EventType("pointerup", { bubbles: true, button: 0, clientX, clientY }));
+                await Zotero.Promise.delay(250);
+                await this.handlePageClick(win, "", map, { clientX, clientY, target });
+                win.setTimeout(() => this.clearOverlay(win), 1200);
+                return;
+            }
+            await Zotero.Promise.delay(100);
+        }
     },
 
     clickPosition(win, click) {
@@ -243,9 +299,12 @@ var BilingualSync = {
         if (!viewer) return null;
         for (let pageIndex = 0; pageIndex < viewer.pagesCount; pageIndex++) {
             const pageView = viewer.getPageView(pageIndex);
-            if (!pageView?.div?.contains(click.target) || !pageView.viewport) continue;
-            const surface = pageView.canvas || pageView.div;
-            const bounds = surface.getBoundingClientRect();
+            if (!pageView?.div || !pageView.viewport) continue;
+            const bounds = pageView.div.getBoundingClientRect();
+            const targetInside = pageView.div.contains(click.target);
+            const pointInside = bounds.left <= click.clientX && click.clientX <= bounds.right
+                && bounds.top <= click.clientY && click.clientY <= bounds.bottom;
+            if (!targetInside && !pointInside) continue;
             if (!bounds.width || !bounds.height) return null;
             const viewportX = (click.clientX - bounds.left) * pageView.viewport.width / bounds.width;
             const viewportY = (click.clientY - bounds.top) * pageView.viewport.height / bounds.height;
@@ -257,7 +316,10 @@ var BilingualSync = {
 
     async handlePageClick(win, pdfPath, map, click) {
         const position = this.clickPosition(win, click);
-        if (!position) return;
+        if (!position) {
+            await this.writeStatus?.({ state: "click-no-page", lastClickAt: new Date().toISOString() });
+            return;
+        }
         const pointRect = [
             position.pdfX - 0.8,
             position.pdfY - 0.8,
@@ -266,9 +328,13 @@ var BilingualSync = {
         ];
         const target = this.findTarget(map, position.pageIndex, [pointRect]);
         this.clearOverlay(win);
-        if (!target) return;
+        if (!target) {
+            await this.writeStatus?.({ state: "click-no-sentence", lastClickAt: new Date().toISOString(), page: position.pageIndex + 1, mapVersion: map.version });
+            return;
+        }
         this.drawOverlay(win, position.pageIndex, target.sourceRects || [], "source");
         if (!this.drawOverlay(win, position.pageIndex, target.rects || [], "target")) return;
+        await this.writeStatus?.({ state: "precise-linked-click", lastClickAt: new Date().toISOString(), page: position.pageIndex + 1, direction: target.direction, mapVersion: target.mapVersion });
         Zotero.debug("[BilingualSync] linked " + target.direction + " on page " + (position.pageIndex + 1));
     },
 
