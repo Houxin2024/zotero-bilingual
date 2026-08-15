@@ -24,7 +24,12 @@ def upgrade_one(path: Path, cache_dir: Path, model: str) -> str:
 
 def scan(folder: Path, cache_dir: Path, model: str) -> dict:
     result = {"upgraded": 0, "already-v3": 0, "failed": []}
-    for path in sorted(folder.glob("*.compare.pdf.bilingual.json")):
+    paths = {
+        *folder.glob("*.compare.pdf.bilingual.json"),
+        *folder.glob("*.LR_dual.pdf.bilingual.json"),
+        *folder.glob("*.lr_dual.pdf.bilingual.json"),
+    }
+    for path in sorted(paths):
         try:
             state = upgrade_one(path, cache_dir, model)
             result[state] += 1

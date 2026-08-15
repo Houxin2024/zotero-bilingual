@@ -1,6 +1,6 @@
 # PDF2zh 自动集成
 
-目标是在 PDF2zh 生成 `*.compare.pdf` 后，同时生成同名 `*.bilingual.json`。Zotero PDF2zh 插件仍负责下载并附加 PDF；Bilingual Linked Reader 负责读取 sidecar 和联动高亮。
+目标是在 PDF2zh 生成 `*.compare.pdf` 或 `*.LR_dual.pdf` 后，同时生成同名 `*.bilingual.json`。Zotero PDF2zh 插件仍负责下载并附加 PDF；Bilingual Linked Reader 负责读取 sidecar 和联动高亮。
 
 ## 推荐调用
 

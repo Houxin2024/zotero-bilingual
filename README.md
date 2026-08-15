@@ -32,7 +32,7 @@ python scripts/build_xpi.py
 
 - 原始英文 PDF
 - 中文 mono PDF
-- 左右双栏 compare PDF
+- 左右双栏 compare PDF，或 PDF2zh Next 生成的 `LR_dual.pdf`
 
 然后执行：
 
@@ -50,6 +50,9 @@ python -m venv .venv
 ```text
 paper.compare.pdf.bilingual.json
 ```
+
+若输入是 `paper.LR_dual.pdf`，sidecar 将相应命名为
+`paper.LR_dual.pdf.bilingual.json`，插件会自动识别两种形式。
 
 如果你使用本地 PDF2zh Server，可在翻译结束后自动调用此命令；参考 [PDF2zh 自动集成](docs/pdf2zh-integration.md)。PDF2zh 插件会把 compare PDF 自动附加回原 Zotero 条目，本插件从本地服务器读取同名 sidecar。
 
