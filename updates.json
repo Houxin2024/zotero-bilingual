@@ -1,0 +1,19 @@
+{
+  "addons": {
+    "bilingual-linked-reader@houxin2024.github.io": {
+      "updates": [
+        {
+          "version": "0.9.1",
+          "update_link": "https://raw.githubusercontent.com/Houxin2024/zotero-bilingual-linked-reader/main/dist/bilingual-linked-reader-0.9.1.xpi",
+          "update_hash": "sha256:c86939069230fdeafa764e36b9997375047aed1b9f826df02a9099fef652e6b0",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "7.0",
+              "strict_max_version": "9.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
