@@ -14,11 +14,19 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/showcase/autodesign-figure-layout.png" width="1000" alt="AutoDesign 论文图表页的中英双栏排版对照">
+  <img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="DreamX-Phi 论文框架图与正文的中英双栏排版对照">
 </p>
 
 <p align="center">
-  <img src="docs/assets/showcase/autodesign-equation-layout.png" width="1000" alt="AutoDesign 论文公式与框架图页面的中英双栏排版对照">
+  <img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="DreamX-Phi 论文正文与联动高亮的中英双栏排版对照">
+</p>
+
+<p align="center">
+  <img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="DreamX-Phi 论文表格、公式与方法章节的中英双栏排版对照">
+</p>
+
+<p align="center">
+  <img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="DreamX-Phi 论文方法框架图与公式的中英双栏排版对照">
 </p>
 
 <p align="center"><sub>真实论文页面仅用于展示排版效果；论文内容与版权归各自作者所有。</sub></p>
