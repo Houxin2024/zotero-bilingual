@@ -15,6 +15,19 @@ python backend/watch_translated.py \
 
 watcher 会在文件稳定后处理，映射写入 `.building`，验证存在有效句对后再原子替换最终 sidecar。异常写入状态文件并退避重试，不会把 PDF 翻译标记为失败。
 
+状态文件会持续写入 `mappingProgress`（0--100）、`mappingStage` 和
+`mappingDetail`。当前阶段包括解析双栏版面、加载语义模型、编码中英句子、
+语义对齐和写入映射。Zotero 阅读器可通过
+`extensions.bilingualLinkedReader.mappingStatusPath` 直接读取该文件；也可由
+PDF2zh Server 暴露以下轻量接口：
+
+```text
+GET /api/mapping-status?filename=<dual PDF 文件名>
+```
+
+配套任务页可把 watcher 的 `processing` 状态作为独立的 `phase=mapping`
+活动任务展示，从而在翻译 PDF 已返回后继续显示真实映射进度。
+
 Windows 一次性启动：
 
 ```powershell

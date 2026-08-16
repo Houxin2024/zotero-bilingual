@@ -130,7 +130,31 @@ class SidecarWatcher:
         sidecar = Path(str(pdf) + ".bilingual.json")
         building = Path(str(sidecar) + ".building")
         building.unlink(missing_ok=True)
-        self.write_status(state="processing", currentFile=pdf.name, lastStartedAt=utc_now())
+        self.write_status(
+            state="processing",
+            currentFile=pdf.name,
+            lastStartedAt=utc_now(),
+            mappingProgress=1,
+            mappingStage="准备句子映射",
+            mappingDetail=None,
+        )
+        last_progress = -1
+        last_stage = ""
+
+        def report_progress(value: int, stage: str, detail: str | None = None) -> None:
+            nonlocal last_progress, last_stage
+            value = max(1, min(99, int(value)))
+            if value == last_progress and stage == last_stage:
+                return
+            last_progress, last_stage = value, stage
+            self.write_status(
+                state="processing",
+                currentFile=pdf.name,
+                mappingProgress=value,
+                mappingStage=stage,
+                mappingDetail=detail,
+            )
+
         before = pdf.stat()
         result = prepare(
             None,
@@ -141,6 +165,7 @@ class SidecarWatcher:
             self.model,
             False,
             True,
+            report_progress,
         )
         after = pdf.stat()
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
@@ -168,6 +193,10 @@ class SidecarWatcher:
         self.write_status(
             state="ready",
             currentFile=None,
+            completedFile=pdf.name,
+            mappingProgress=100,
+            mappingStage="句子映射已就绪",
+            mappingDetail=None,
             lastCompletedAt=utc_now(),
             lastOutput=str(sidecar),
             lastResult=result,
@@ -186,6 +215,8 @@ class SidecarWatcher:
                 self.write_status(
                     state="waiting-stable",
                     currentFile=None,
+                    mappingProgress=0,
+                    mappingStage="等待 PDF 写入完成",
                     lastDeferredFile=pdf.name,
                     lastDeferredReason=str(error),
                 )
@@ -197,6 +228,7 @@ class SidecarWatcher:
                 self.write_status(
                     state="retry-wait",
                     currentFile=None,
+                    mappingStage="映射生成失败，准备重试",
                     lastFailedFile=pdf.name,
                     lastError=str(error),
                     retryInSeconds=delay,

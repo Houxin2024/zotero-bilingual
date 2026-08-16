@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -234,8 +235,16 @@ def align_units(en_units: list[dict], zh_units: list[dict], en_vectors: np.ndarr
     return pairs
 
 
-def realign(base_map: Path, output: Path, model_name: str, cache_dir: Path) -> dict:
+def realign(
+    base_map: Path,
+    output: Path,
+    model_name: str,
+    cache_dir: Path,
+    progress: Callable[[int, str, str | None], None] | None = None,
+) -> dict:
     payload = json.loads(base_map.read_text(encoding="utf-8"))
+    if progress:
+        progress(40, "加载语义模型", None)
     model = TextEmbedding(model_name, cache_dir=str(cache_dir))
     new_segments = []
     semantic_scores = []
@@ -247,10 +256,23 @@ def realign(base_map: Path, output: Path, model_name: str, cache_dir: Path) -> d
             all_texts.extend(unit["text"] for unit in en_units)
             all_texts.extend(unit["text"] for unit in zh_units)
             prepared.append((segment, en_units, zh_units))
-        all_vectors = np.asarray(list(model.embed(all_texts)), dtype=np.float32)
+        vector_batches = []
+        batch_size = 128
+        for start in range(0, len(all_texts), batch_size):
+            end = min(len(all_texts), start + batch_size)
+            vector_batches.append(
+                np.asarray(list(model.embed(all_texts[start:end])), dtype=np.float32)
+            )
+            if progress:
+                progress(
+                    45 + round(35 * end / max(1, len(all_texts))),
+                    "编码中英句子",
+                    f"{end}/{len(all_texts)} 句",
+                )
+        all_vectors = np.vstack(vector_batches)
         all_vectors /= np.maximum(np.linalg.norm(all_vectors, axis=1, keepdims=True), 1e-12)
         vector_index = 0
-        for segment, en_units, zh_units in prepared:
+        for segment_index, (segment, en_units, zh_units) in enumerate(prepared):
             en_vectors = all_vectors[vector_index:vector_index + len(en_units)]
             vector_index += len(en_units)
             zh_vectors = all_vectors[vector_index:vector_index + len(zh_units)]
@@ -260,6 +282,12 @@ def realign(base_map: Path, output: Path, model_name: str, cache_dir: Path) -> d
             updated = dict(segment)
             updated["sentencePairs"] = pairs
             new_segments.append(updated)
+            if progress:
+                progress(
+                    80 + round(18 * (segment_index + 1) / max(1, len(prepared))),
+                    "语义对齐句子",
+                    f"{segment_index + 1}/{len(prepared)} 个段落",
+                )
         payload["version"] = 4
         payload["alignment"] = {"method": "final-dual-orientation-aware-paragraph-and-semantic-sentence-dp", "model": model_name, "baseMap": base_map.name}
         payload["segments"] = new_segments
@@ -271,8 +299,10 @@ def realign(base_map: Path, output: Path, model_name: str, cache_dir: Path) -> d
         }
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        if progress:
+            progress(99, "写入句子映射", None)
         return payload["stats"]
-    for page in payload["pages"]:
+    for page_position, page in enumerate(payload["pages"]):
         page_index = int(page["pageIndex"])
         page_segments = [segment for segment in payload["segments"] if int(segment["pageIndex"]) == page_index]
         for column in (0, 1, 2):
@@ -301,6 +331,12 @@ def realign(base_map: Path, output: Path, model_name: str, cache_dir: Path) -> d
                 "zhSentences": zh_units,
                 "sentencePairs": pairs,
             })
+        if progress:
+            progress(
+                45 + round(53 * (page_position + 1) / max(1, len(payload["pages"]))),
+                "语义对齐句子",
+                f"第 {page_position + 1}/{len(payload['pages'])} 页",
+            )
     payload["version"] = 3
     payload["alignment"] = {
         "method": "column-monotonic-multilingual-semantic-dp",
@@ -317,6 +353,8 @@ def realign(base_map: Path, output: Path, model_name: str, cache_dir: Path) -> d
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    if progress:
+        progress(99, "写入句子映射", None)
     return payload["stats"]
 
 

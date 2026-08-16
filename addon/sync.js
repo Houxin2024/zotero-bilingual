@@ -2,6 +2,7 @@
 
 var BilingualSync = {
     pluginID: "bilingual-linked-reader@houxin2024.github.io",
+    mappingStatusPath: null,
     mapCache: new Map(),
     viewerState: new WeakMap(),
     readyReaders: new WeakSet(),
@@ -9,6 +10,7 @@ var BilingualSync = {
     ignoredReaders: new WeakSet(),
     mapRetry: new WeakMap(),
     residentCacheWindows: new Set(),
+    progressWindows: new Set(),
     handler: null,
     toolbarHandler: null,
     active: false,
@@ -56,6 +58,9 @@ var BilingualSync = {
 
     stop() {
         this.active = false;
+        for (const win of [...this.progressWindows]) {
+            this.hideMappingProgress(win);
+        }
         for (const win of [...this.residentCacheWindows]) {
             this.releaseResidentPageCache(win);
         }
@@ -567,6 +572,113 @@ var BilingualSync = {
             : response.response;
     },
 
+    async readMappingStatus(pdfPath) {
+        const basename = pdfPath.replace(/^.*[\\/]/, "");
+        const configuredPath = String(
+            this.mappingStatusPath
+            || Zotero.Prefs.get("extensions.bilingualLinkedReader.mappingStatusPath", true)
+            || "",
+        );
+        let status = null;
+        if (configuredPath) {
+            try {
+                status = await this.readJSON(configuredPath);
+            }
+            catch (error) {
+                // Fall back to the local translation server below.
+            }
+        }
+        if (!status) {
+            try {
+                const server = String(
+                    Zotero.Prefs.get("extensions.bilingualLinkedReader.serverURL", true)
+                    || Zotero.Prefs.get("extensions.zotero.pdf2zh.new_serverip", true)
+                    || "http://127.0.0.1:8890",
+                ).replace(/\/$/, "");
+                status = await this.readRemoteJSON(
+                    server + "/api/mapping-status?filename=" + encodeURIComponent(basename),
+                );
+            }
+            catch (error) {
+                return null;
+            }
+        }
+        const statusFile = status.currentFile || status.completedFile || "";
+        return statusFile === basename ? status : null;
+    },
+
+    showMappingProgress(win, status) {
+        if (!win?.document?.body) return;
+        const document = win.document;
+        let node = document.getElementById("codex-bilingual-map-progress");
+        if (!node) {
+            node = document.createElement("div");
+            node.id = "codex-bilingual-map-progress";
+            node.innerHTML = "<div class='codex-map-title'></div><div class='codex-map-track'><div class='codex-map-fill'></div></div><div class='codex-map-detail'></div>";
+            Object.assign(node.style, {
+                position: "fixed",
+                right: "18px",
+                bottom: "18px",
+                width: "270px",
+                padding: "12px 14px",
+                background: "rgba(255,255,255,0.96)",
+                color: "#273142",
+                border: "1px solid rgba(102,126,234,0.38)",
+                borderRadius: "10px",
+                boxShadow: "0 8px 26px rgba(31,41,55,0.18)",
+                font: "13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+                zIndex: "2147483646",
+                pointerEvents: "none",
+            });
+            const track = node.querySelector(".codex-map-track");
+            Object.assign(track.style, {
+                height: "6px",
+                marginTop: "8px",
+                overflow: "hidden",
+                background: "#e7eaf3",
+                borderRadius: "999px",
+            });
+            Object.assign(node.querySelector(".codex-map-fill").style, {
+                height: "100%",
+                width: "0%",
+                background: "linear-gradient(90deg,#667eea,#7c3aed)",
+                borderRadius: "999px",
+                transition: "width 0.35s ease",
+            });
+            Object.assign(node.querySelector(".codex-map-detail").style, {
+                minHeight: "16px",
+                marginTop: "6px",
+                color: "#6b7280",
+                fontSize: "11px",
+            });
+            document.body.appendChild(node);
+            this.progressWindows.add(win);
+        }
+        const progress = Math.max(0, Math.min(100, Number(status?.mappingProgress) || 0));
+        const ready = progress >= 100;
+        node.querySelector(".codex-map-title").textContent = ready
+            ? "✓ 双语句子映射已就绪"
+            : `双语句子映射 ${Math.round(progress)}% · ${status?.mappingStage || "等待后台启动"}`;
+        node.querySelector(".codex-map-fill").style.width = progress + "%";
+        node.querySelector(".codex-map-fill").style.background = ready
+            ? "#16a34a"
+            : "linear-gradient(90deg,#667eea,#7c3aed)";
+        node.querySelector(".codex-map-detail").textContent = status?.mappingDetail || (ready ? "现在可以单击任一侧句子联动。" : "PDF 已生成，正在建立中英文坐标关系。 ");
+        if (ready) {
+            win.setTimeout(() => this.hideMappingProgress(win), 3000);
+        }
+    },
+
+    hideMappingProgress(win) {
+        try {
+            win?.document?.getElementById("codex-bilingual-map-progress")?.remove();
+        }
+        catch (error) {
+            // The reader window may already be closing.
+        }
+        this.progressWindows.delete(win);
+    },
+
     async loadMap(pdfPath, forceRefresh = false) {
         const cached = this.mapCache.get(pdfPath) || null;
         if (cached && !forceRefresh) return cached;
@@ -653,6 +765,14 @@ var BilingualSync = {
                 attachment: pdfPath.replace(/^.*[\\/]/, ""),
                 retryInMilliseconds: delay,
             });
+            this.showMappingProgress(
+                win,
+                await this.readMappingStatus(pdfPath) || {
+                    mappingProgress: 0,
+                    mappingStage: "等待后台启动",
+                    mappingDetail: "翻译已完成，句子映射任务即将开始。",
+                },
+            );
             return;
         }
         this.mapRetry.delete(reader);
@@ -665,6 +785,11 @@ var BilingualSync = {
                 }
                 this.ensureSelectionWatcher(win);
                 this.ensureClickWatcher(win, pdfPath, map);
+                this.showMappingProgress(win, {
+                    mappingProgress: 100,
+                    mappingStage: "句子映射已就绪",
+                    mappingDetail: "现在可以单击任一侧句子联动。",
+                });
                 this.readyReaders.add(reader);
                 this.readyReaderWindows.set(reader, win);
                 await this.runSingleClickSmokeTest(win, map);

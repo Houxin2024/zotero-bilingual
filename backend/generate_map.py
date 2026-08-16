@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pymupdf
@@ -184,7 +185,11 @@ def align_direct_page(en_blocks: list[dict], zh_blocks: list[dict], page_height:
     return rows
 
 
-def generate_direct_dual_map(compare_path: str, output_path: str) -> dict:
+def generate_direct_dual_map(
+    compare_path: str,
+    output_path: str,
+    progress: Callable[[int, str, str | None], None] | None = None,
+) -> dict:
     compare = pymupdf.open(compare_path)
     pages, segments = [], []
     for page_index, page in enumerate(compare):
@@ -199,6 +204,12 @@ def generate_direct_dual_map(compare_path: str, output_path: str) -> dict:
         zh_clip, zh_offset = (left_clip, 0.0) if left_language == "zh" else (right_clip, half_width)
         pages.append({"pageIndex": page_index, "width": round(page.rect.width, 2), "height": round(page.rect.height, 2), "rightOffset": round(half_width, 2), "leftLanguage": left_language, "rightLanguage": right_language})
         segments.extend(align_direct_page(extract_blocks(page, "en", en_clip), extract_blocks(page, "zh", zh_clip), page.rect.height, half_width, page_index, en_offset, zh_offset))
+        if progress:
+            progress(
+                round(100 * (page_index + 1) / max(1, compare.page_count)),
+                "解析双栏版面",
+                f"第 {page_index + 1}/{compare.page_count} 页",
+            )
     payload = {
         "version": 4, "compareFile": Path(compare_path).name,
         "layout": {"source": "final-dual", "languageDetection": "unicode-majority"},
@@ -389,7 +400,13 @@ def align_page(en_blocks: list[dict], zh_blocks: list[dict], page_width: float, 
     return rows
 
 
-def generate_map(original_path: str, translated_path: str, compare_path: str, output_path: str) -> dict:
+def generate_map(
+    original_path: str,
+    translated_path: str,
+    compare_path: str,
+    output_path: str,
+    progress: Callable[[int, str, str | None], None] | None = None,
+) -> dict:
     original = pymupdf.open(original_path)
     translated = pymupdf.open(translated_path)
     compare = pymupdf.open(compare_path)
@@ -416,6 +433,12 @@ def generate_map(original_path: str, translated_path: str, compare_path: str, ou
             right_offset,
             compare_page.rect.height,
         ))
+        if progress:
+            progress(
+                round(100 * (page_index + 1) / max(1, page_count)),
+                "解析双栏版面",
+                f"第 {page_index + 1}/{page_count} 页",
+            )
     payload = {
         "version": 2,
         "compareFile": Path(compare_path).name,

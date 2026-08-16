@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from generate_map import generate_direct_dual_map, generate_map
@@ -21,20 +22,34 @@ def prepare(
     model: str,
     geometry_only: bool,
     direct_dual: bool = True,
+    progress: Callable[[int, str, str | None], None] | None = None,
 ) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(output.name + ".v2.tmp")
+    geometry_progress = None
+    if progress:
+        geometry_progress = lambda value, stage, detail: progress(
+            5 + round(30 * value / 100), stage, detail
+        )
     if direct_dual:
-        geometry = generate_direct_dual_map(str(compare), str(temporary))
+        geometry = generate_direct_dual_map(
+            str(compare), str(temporary), geometry_progress
+        )
     else:
         if original is None or translated is None:
             raise ValueError("original and translated PDFs are required for legacy intermediate alignment")
-        geometry = generate_map(str(original), str(translated), str(compare), str(temporary))
+        geometry = generate_map(
+            str(original),
+            str(translated),
+            str(compare),
+            str(temporary),
+            geometry_progress,
+        )
     if geometry_only:
         os.replace(temporary, output)
         return {"version": geometry["version"], **geometry["stats"]}
     try:
-        stats = realign(temporary, output, model, cache_dir)
+        stats = realign(temporary, output, model, cache_dir, progress)
         temporary.unlink(missing_ok=True)
         return {"version": 4 if direct_dual else 3, **stats}
     except Exception as error:
