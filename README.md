@@ -5,6 +5,14 @@
 ![Zotero](https://img.shields.io/badge/Zotero-7--9-CC2936)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
+## 效果展示
+
+<p align="center">
+  <img src="docs/assets/linked-selection-demo.gif" width="900" alt="在 Zotero 双栏中英 PDF 中单击任一句，两侧对应句子同步高亮">
+</p>
+
+<p align="center"><sub>单击英文或中文句子，另一侧对应译句立即同步高亮；双击和拖选仍使用 Zotero 原生行为。动画使用示例文字，不包含论文或私人数据。</sub></p>
+
 ## 特点
 
 - 单击联动高亮，使用下一帧绘制，不人为等待双击超时。
