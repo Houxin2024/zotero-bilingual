@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip"><strong>⬇️ 下载 Windows 一键安装包 v0.9.3</strong></a>
-  · <a href="docs/windows-one-click.md">安装说明</a>
+  · <a href="docs/windows-one-click.md">高级安装说明</a>
   · <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/issues">问题反馈</a>
 </p>
 
