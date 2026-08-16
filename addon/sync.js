@@ -11,6 +11,7 @@ var BilingualSync = {
     mapRetry: new WeakMap(),
     residentCacheWindows: new Set(),
     progressWindows: new Set(),
+    progressSequence: 0,
     handler: null,
     toolbarHandler: null,
     active: false,
@@ -662,6 +663,8 @@ var BilingualSync = {
             this.progressWindows.add(win);
         }
         node.dataset.attachment = attachment;
+        const updateToken = String(++this.progressSequence);
+        node.dataset.updateToken = updateToken;
         const progress = Math.max(0, Math.min(100, Number(status?.mappingProgress) || 0));
         const ready = progress >= 100;
         node.querySelector(".codex-map-title").textContent = ready
@@ -672,12 +675,15 @@ var BilingualSync = {
             ? "#16a34a"
             : "linear-gradient(90deg,#667eea,#7c3aed)";
         node.querySelector(".codex-map-detail").textContent = status?.mappingDetail || (ready ? "现在可以单击任一侧句子联动。" : "PDF 已生成，正在建立中英文坐标关系。 ");
-        if (ready) {
-            win.setTimeout(() => this.hideMappingProgress(win, attachment), 3000);
-        }
+        // Active mapping refreshes this token at least every five seconds.
+        // An abandoned reader iframe therefore cannot leave a card forever.
+        win.setTimeout(
+            () => this.hideMappingProgress(win, attachment, updateToken),
+            ready ? 3000 : 12000,
+        );
     },
 
-    hideMappingProgress(win, pdfPath = "") {
+    hideMappingProgress(win, pdfPath = "", expectedToken = "") {
         try {
             const node = win?.document?.getElementById("codex-bilingual-map-progress");
             const attachment = String(pdfPath || "").replace(/^.*[\\/]/, "");
@@ -688,6 +694,9 @@ var BilingualSync = {
             ) {
                 return false;
             }
+            if (expectedToken && node?.dataset?.updateToken !== expectedToken) {
+                return false;
+            }
             node?.remove();
         }
         catch (error) {
@@ -695,6 +704,13 @@ var BilingualSync = {
         }
         this.progressWindows.delete(win);
         return true;
+    },
+
+    hideMappingProgressForAttachment(pdfPath, exceptWin = null) {
+        for (const progressWin of [...this.progressWindows]) {
+            if (progressWin === exceptWin) continue;
+            this.hideMappingProgress(progressWin, pdfPath);
+        }
     },
 
     async loadMap(pdfPath, forceRefresh = false) {
@@ -795,6 +811,7 @@ var BilingualSync = {
             return;
         }
         this.mapRetry.delete(reader);
+        this.hideMappingProgressForAttachment(pdfPath);
         for (let attempt = 0; attempt < 30; attempt++) {
             win = this.getViewerWindow(reader);
             if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
@@ -804,6 +821,7 @@ var BilingualSync = {
                 }
                 this.ensureSelectionWatcher(win);
                 this.ensureClickWatcher(win, pdfPath, map);
+                this.hideMappingProgressForAttachment(pdfPath, win);
                 this.showMappingProgress(win, {
                     mappingProgress: 100,
                     mappingStage: "句子映射已就绪",
@@ -988,6 +1006,10 @@ var BilingualSync = {
             await this.writeStatus?.({ state: "click-no-sentence", lastClickAt: new Date().toISOString(), page: position.pageIndex + 1, mapVersion: activeMap.version });
             return;
         }
+        // A linked click proves mapping is complete, so no progress UI should
+        // remain in the current or an abandoned reader window.
+        if (pdfPath) this.hideMappingProgressForAttachment(pdfPath);
+        this.hideMappingProgress(win, pdfPath);
         this.drawOverlay(win, position.pageIndex, target.sourceRects || [], "source");
         if (!this.drawOverlay(win, position.pageIndex, target.rects || [], "target")) return;
         await this.writeStatus?.({ state: "precise-linked-click", lastClickAt: new Date().toISOString(), page: position.pageIndex + 1, direction: target.direction, mapVersion: target.mapVersion });
