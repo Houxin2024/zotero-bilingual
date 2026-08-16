@@ -7,13 +7,12 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-layout.png" width="1000" alt="DreamX-Phi 论文首页的中英双栏 PDF">
+  <img src="docs/assets/showcase/textgrad-page-1-layout.png" width="1000" alt="TextGrad 论文首页的中英双栏真实翻译页面与对应句高亮">
 </p>
 
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="DreamX-Phi 框架图与正文的中英双栏 PDF"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="DreamX-Phi 中英双栏 PDF 的对应句同步高亮"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="DreamX-Phi 表格、公式与方法章节的中英双栏 PDF"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="DreamX-Phi 复杂框架图与公式的中英双栏 PDF"></p>
+<p align="center"><img src="docs/assets/showcase/textgrad-page-2-layout.png" width="1000" alt="TextGrad 框架图与图注的中英双栏真实翻译页面"></p>
+<p align="center"><img src="docs/assets/showcase/textgrad-page-3-layout.png" width="1000" alt="TextGrad 公式、方法正文与对应句同步高亮的真实翻译页面"></p>
+<p align="center"><img src="docs/assets/showcase/textgrad-page-4-layout.png" width="1000" alt="TextGrad 方法章节的中英双栏真实翻译页面与对应句高亮"></p>
 
 <p align="center"><sub>以上均为真实论文翻译页面，仅用于展示排版效果；论文内容与版权归各自作者所有。</sub></p>
 

@@ -7,13 +7,12 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-layout.png" width="1000" alt="A real DreamX-Phi page translated into a side-by-side bilingual PDF">
+  <img src="docs/assets/showcase/textgrad-page-1-layout.png" width="1000" alt="A real translated TextGrad title page with side-by-side bilingual layout and linked highlighting">
 </p>
 
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="A real bilingual PDF page with a framework figure"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="Linked sentence highlighting in a real side-by-side bilingual PDF"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="Real bilingual PDF tables and equations"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="A real bilingual PDF with a complex figure and equations"></p>
+<p align="center"><img src="docs/assets/showcase/textgrad-page-2-layout.png" width="1000" alt="A real translated TextGrad page preserving its framework figure and caption"></p>
+<p align="center"><img src="docs/assets/showcase/textgrad-page-3-layout.png" width="1000" alt="A real translated TextGrad methods page with equations and linked sentence highlighting"></p>
+<p align="center"><img src="docs/assets/showcase/textgrad-page-4-layout.png" width="1000" alt="A real translated TextGrad methods page with side-by-side layout and linked highlighting"></p>
 
 <p align="center"><sub>All examples are real translated paper pages shown only to demonstrate layout preservation. Copyright remains with their respective authors.</sub></p>
 
