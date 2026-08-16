@@ -1,4 +1,4 @@
-# Zotero Bilingual PDF Reader
+# Zotero Bilingual Side-by-Side Reader
 
 <p align="center"><strong>Create layout-preserving, side-by-side bilingual PDFs in Zotero; click any sentence to highlight its counterpart.</strong></p>
 
@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip"><strong>⬇️ Download the Windows installer v0.9.3</strong></a>
-  · <a href="docs/windows-one-click.md">Setup guide (Chinese)</a>
+  · <a href="docs/windows-one-click.md">Advanced setup guide (Chinese)</a>
   · <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/issues">Report an issue</a>
 </p>
 
@@ -40,14 +40,9 @@
 > [!TIP]
 > New installations use **SiliconFlow Free** by default, with no account or API key required. It is an online third-party service and may be rate-limited. Use your own API or a local service for sensitive papers.
 
-The first setup downloads a private Python runtime, PDF2zh Next, and the local sentence-alignment model. Allow a few minutes and 2–3 GB of disk space. After setup, the backend starts automatically at Windows sign-in.
+The first setup downloads a private Python runtime, PDF2zh Next, and the local sentence-alignment model. Allow a few minutes. After setup, the backend starts automatically at Windows sign-in.
 
-## Daily workflow
-
-1. Select a paper or PDF attachment in Zotero.
-2. Choose `PDF2zh → Translate` from the context menu.
-3. The bilingual PDF is attached and opened automatically; mapping progress appears in the lower-right corner.
-4. When mapping is ready, click any sentence to read its match.
+After setup, select a paper or PDF attachment in Zotero and choose `PDF2zh → Translate` from the context menu. The bilingual PDF is attached and opened automatically, with sentence-mapping progress in the lower-right corner; once mapping is ready, click any sentence to highlight its counterpart.
 
 ## Privacy
 
