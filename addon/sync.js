@@ -646,8 +646,13 @@ var BilingualSync = {
         const map = await this.loadMap(pdfPath);
         if (!map) {
             const attempts = (retry?.attempts || 0) + 1;
-            const delay = Math.min(30000, 1000 * (2 ** Math.min(attempts - 1, 5)));
+            const delay = Math.min(5000, 1000 * (2 ** Math.min(attempts - 1, 3)));
             this.mapRetry.set(reader, { attempts, at: Date.now() + delay });
+            await this.writeStatus?.({
+                state: "waiting-for-sentence-map",
+                attachment: pdfPath.replace(/^.*[\\/]/, ""),
+                retryInMilliseconds: delay,
+            });
             return;
         }
         this.mapRetry.delete(reader);
