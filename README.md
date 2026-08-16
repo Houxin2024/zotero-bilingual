@@ -1,4 +1,4 @@
-# Zotero 中英双栏 PDF 阅读器
+# Zotero 中英双栏阅读器
 
 <p align="center"><strong>在 Zotero 中一键生成保留原排版的中英双栏 PDF；单击任一句，对应译句同步高亮。</strong></p>
 
