@@ -9,6 +9,9 @@ var BilingualSync = {
     readyReaderWindows: new WeakMap(),
     ignoredReaders: new WeakSet(),
     mapRetry: new WeakMap(),
+    mapRetryEntries: new Set(),
+    preparingReaders: new WeakSet(),
+    backendStateByPDF: new Map(),
     residentCacheWindows: new Set(),
     progressWindows: new Set(),
     progressSequence: 0,
@@ -18,7 +21,9 @@ var BilingualSync = {
 
     async start() {
         this.active = true;
-        this.configurePDF2zhForLinkedReading();
+        if (Zotero.Prefs.get("extensions.bilingualLinkedReader.configurePDF2zh", true)) {
+            this.configurePDF2zhForLinkedReading();
+        }
         this.handler = (event) => {
             this.handleSelection(event).catch(error => {
                 Zotero.logError(error);
@@ -50,15 +55,18 @@ var BilingualSync = {
             "extensions.zotero.pdf2zh.transFirst": true,
             "extensions.zotero.pdf2zh.dual-open": true,
             "extensions.zotero.pdf2zh.disableRichTextTranslate": true,
-            "extensions.bilingualLinkedReader.residentPageCacheEnabled": false,
         };
         for (const [key, value] of Object.entries(preferences)) {
+            // Respect choices already made in PDF2zh. This only supplies the
+            // linked-reader defaults for preferences the user has not changed.
+            if (Zotero.Prefs.prefHasUserValue(key, true)) continue;
             Zotero.Prefs.set(key, value, true);
         }
     },
 
     stop() {
         this.active = false;
+        this.clearAllMapRetries();
         for (const win of [...this.progressWindows]) {
             this.hideMappingProgress(win);
         }
@@ -78,6 +86,9 @@ var BilingualSync = {
         this.readyReaderWindows = new WeakMap();
         this.ignoredReaders = new WeakSet();
         this.mapRetry = new WeakMap();
+        this.mapRetryEntries.clear();
+        this.preparingReaders = new WeakSet();
+        this.backendStateByPDF.clear();
     },
 
     getViewerWindow(reader) {
@@ -547,7 +558,45 @@ var BilingualSync = {
         throw new Error("Zotero.File.getContentsAsync is unavailable");
     },
 
+    getServerURL() {
+        const ownKey = "extensions.bilingualLinkedReader.serverURL";
+        let configured = "";
+        if (Zotero.Prefs.prefHasUserValue(ownKey, true)) {
+            configured = String(Zotero.Prefs.get(ownKey, true) || "").trim();
+        }
+        if (!configured) {
+            configured = String(
+                Zotero.Prefs.get("extensions.zotero.pdf2zh.new_serverip", true) || "",
+            ).trim();
+        }
+        return (configured || "http://127.0.0.1:8890").replace(/\/+$/, "");
+    },
+
+    classifyRemoteError(error) {
+        const status = Number(error?.status || error?.xmlhttp?.status || 0);
+        if (error?.bilingualServerReachable) {
+            return { reachable: true, kind: "invalid-response", status };
+        }
+        if (!status) return { reachable: false, kind: "offline", status: 0 };
+        if (status === 404) return { reachable: true, kind: "not-found", status };
+        return { reachable: true, kind: "http-error", status };
+    },
+
+    rememberBackendState(pdfPath, state) {
+        if (!pdfPath) return;
+        this.backendStateByPDF.set(pdfPath, {
+            ...state,
+            checkedAt: Date.now(),
+            serverURL: this.getServerURL(),
+        });
+    },
+
     indexMap(map) {
+        if (!map || !Array.isArray(map.pages) || !Array.isArray(map.segments)) {
+            const error = new Error("Invalid bilingual map payload");
+            error.bilingualServerReachable = true;
+            throw error;
+        }
         if (map.__bilingualIndex) return map;
         const pages = new Map((map.pages || []).map(page => [Number(page.pageIndex), page]));
         const segments = new Map();
@@ -567,10 +616,24 @@ var BilingualSync = {
         const response = await Zotero.HTTP.request("GET", url, {
             responseType: "json",
             timeout: 1800,
+            errorDelayMax: 0,
+            noCache: true,
         });
-        return typeof response.response === "string"
-            ? JSON.parse(response.response)
-            : response.response;
+        try {
+            const data = typeof response.response === "string"
+                ? JSON.parse(response.response)
+                : response.response;
+            if (!data || typeof data !== "object") {
+                throw new Error("Server returned an empty or non-JSON response");
+            }
+            return data;
+        }
+        catch (error) {
+            // Keep a malformed successful response distinct from a connection
+            // failure so the UI does not incorrectly tell users to start it.
+            error.bilingualServerReachable = true;
+            throw error;
+        }
     },
 
     async readMappingStatus(pdfPath) {
@@ -584,28 +647,48 @@ var BilingualSync = {
         if (configuredPath) {
             try {
                 status = await this.readJSON(configuredPath);
+                const statusFile = String(
+                    status.currentFile || status.completedFile || status.attachment || "",
+                ).replace(/^.*[\\/]/, "");
+                if (statusFile === basename) return status;
             }
             catch (error) {
                 // Fall back to the local translation server below.
             }
         }
-        if (!status) {
+
+        const server = this.getServerURL();
+        const urls = [
+            server + "/api/mapping-status?filename=" + encodeURIComponent(basename),
+            server + "/translatedFile/" + encodeURIComponent(".bilingual-mapping-status.json"),
+        ];
+        let sawReachable = false;
+        let reachableFailure = null;
+        let offlineFailure = null;
+        for (const url of urls) {
             try {
-                const server = String(
-                    Zotero.Prefs.get("extensions.bilingualLinkedReader.serverURL", true)
-                    || Zotero.Prefs.get("extensions.zotero.pdf2zh.new_serverip", true)
-                    || "http://127.0.0.1:8890",
-                ).replace(/\/$/, "");
-                status = await this.readRemoteJSON(
-                    server + "/api/mapping-status?filename=" + encodeURIComponent(basename),
-                );
+                status = await this.readRemoteJSON(url);
+                sawReachable = true;
+                this.rememberBackendState(pdfPath, { reachable: true, kind: "online", status: 200 });
+                const statusFile = String(
+                    status.currentFile || status.completedFile || status.attachment || "",
+                ).replace(/^.*[\\/]/, "");
+                if (statusFile === basename) return status;
             }
             catch (error) {
-                return null;
+                const failure = this.classifyRemoteError(error);
+                if (failure.reachable) reachableFailure = failure;
+                else offlineFailure = failure;
             }
         }
-        const statusFile = status.currentFile || status.completedFile || "";
-        return statusFile === basename ? status : null;
+        this.rememberBackendState(
+            pdfPath,
+            reachableFailure
+                || (sawReachable ? { reachable: true, kind: "not-found", status: 404 } : null)
+                || offlineFailure
+                || { reachable: true, kind: "not-found", status: 404 },
+        );
+        return null;
     },
 
     showMappingProgress(win, status, pdfPath = "") {
@@ -663,24 +746,66 @@ var BilingualSync = {
             this.progressWindows.add(win);
         }
         node.dataset.attachment = attachment;
+        node.dataset.statusKind = status?.statusKind || "mapping";
         const updateToken = String(++this.progressSequence);
         node.dataset.updateToken = updateToken;
         const progress = Math.max(0, Math.min(100, Number(status?.mappingProgress) || 0));
         const ready = progress >= 100;
-        node.querySelector(".codex-map-title").textContent = ready
+        node.querySelector(".codex-map-title").textContent = status?.statusTitle || (ready
             ? "✓ 双语句子映射已就绪"
-            : `双语句子映射 ${Math.round(progress)}% · ${status?.mappingStage || "等待后台启动"}`;
+            : `双语句子映射 ${Math.round(progress)}% · ${status?.mappingStage || "等待后台启动"}`);
         node.querySelector(".codex-map-fill").style.width = progress + "%";
-        node.querySelector(".codex-map-fill").style.background = ready
-            ? "#16a34a"
-            : "linear-gradient(90deg,#667eea,#7c3aed)";
+        node.querySelector(".codex-map-fill").style.background = status?.statusKind === "offline"
+            ? "#dc2626"
+            : (ready ? "#16a34a" : "linear-gradient(90deg,#667eea,#7c3aed)");
         node.querySelector(".codex-map-detail").textContent = status?.mappingDetail || (ready ? "现在可以单击任一侧句子联动。" : "PDF 已生成，正在建立中英文坐标关系。 ");
-        // Active mapping refreshes this token at least every five seconds.
-        // An abandoned reader iframe therefore cannot leave a card forever.
-        win.setTimeout(
-            () => this.hideMappingProgress(win, attachment, updateToken),
-            ready ? 3000 : 12000,
-        );
+        if (!status?.persistent) {
+            // Active mapping refreshes this token before it expires. Ready
+            // notifications disappear quickly; persistent error/wait states
+            // remain until a retry succeeds or the add-on stops.
+            win.setTimeout(
+                () => this.hideMappingProgress(win, attachment, updateToken),
+                ready ? 3000 : 12000,
+            );
+        }
+    },
+
+    showMapUnavailable(win, pdfPath) {
+        const backend = this.backendStateByPDF.get(pdfPath) || {
+            reachable: false,
+            kind: "offline",
+            status: 0,
+            serverURL: this.getServerURL(),
+        };
+        let statusTitle;
+        let mappingDetail;
+        let statusKind = backend.kind;
+        if (!backend.reachable) {
+            statusTitle = "⚠ 双语后台未运行";
+            mappingDetail = `无法连接 ${backend.serverURL || this.getServerURL()}。请启动 Windows 助手；插件会自动重试。`;
+            statusKind = "offline";
+        }
+        else if (backend.kind === "http-error") {
+            statusTitle = "⚠ 双语后台响应异常";
+            mappingDetail = `服务已连接，但返回 HTTP ${backend.status || "错误"}。插件会自动重试。`;
+        }
+        else if (backend.kind === "invalid-response") {
+            statusTitle = "⚠ 双语后台版本不兼容";
+            mappingDetail = "服务已连接，但返回了无法读取的映射数据。请更新 Windows 助手。";
+        }
+        else {
+            statusTitle = "双语后台已连接 · 等待句对映射";
+            mappingDetail = "双语 PDF 已生成，sidecar 尚未生成。后台映射完成后会自动启用联动。";
+            statusKind = "waiting";
+        }
+        this.showMappingProgress(win, {
+            mappingProgress: 0,
+            mappingStage: "等待句对映射",
+            mappingDetail,
+            persistent: true,
+            statusKind,
+            statusTitle,
+        }, pdfPath);
     },
 
     hideMappingProgress(win, pdfPath = "", expectedToken = "") {
@@ -733,20 +858,18 @@ var BilingualSync = {
                 // Try the next deterministic location.
             }
         }
+        const server = this.getServerURL();
         try {
-            const server = String(
-                Zotero.Prefs.get("extensions.bilingualLinkedReader.serverURL", true)
-                || Zotero.Prefs.get("extensions.zotero.pdf2zh.new_serverip", true)
-                || "http://127.0.0.1:8890",
-            ).replace(/\/$/, "");
             const url = server + "/translatedFile/" + encodeURIComponent(basename + ".bilingual.json");
             const map = this.indexMap(await this.readRemoteJSON(url));
             this.mapCache.set(pdfPath, map);
+            this.rememberBackendState(pdfPath, { reachable: true, kind: "online", status: 200 });
             Zotero.debug("[BilingualSync] loaded map: " + url);
             return map;
         }
         catch (error) {
             // A map may appear after translation finishes, so do not cache misses.
+            this.rememberBackendState(pdfPath, this.classifyRemoteError(error));
         }
         return cached;
     },
@@ -774,65 +897,142 @@ var BilingualSync = {
         this.viewerState.set(win, state);
     },
 
-    async prepareSingleClick(reader) {
-        if (!reader || this.ignoredReaders.has(reader)) return;
-        const pdfPath = await this.getAttachmentPath(reader);
-        if (!pdfPath) return;
-        const label = pdfPath + " " + (reader?._item?.getField?.("title") || "");
-        if (!/(compare|dual)/i.test(label)) {
-            this.ignoredReaders.add(reader);
-            return;
-        }
-        let win = this.getViewerWindow(reader);
-        if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
-            this.ensureResidentPageCache(win, pdfPath);
-        }
+    clearMapRetry(reader) {
         const retry = this.mapRetry.get(reader);
-        if (retry?.at > Date.now()) return;
-        const map = await this.loadMap(pdfPath);
-        if (!map) {
-            const attempts = (retry?.attempts || 0) + 1;
-            const delay = Math.min(5000, 1000 * (2 ** Math.min(attempts - 1, 3)));
-            this.mapRetry.set(reader, { attempts, at: Date.now() + delay });
-            await this.writeStatus?.({
-                state: "waiting-for-sentence-map",
-                attachment: pdfPath.replace(/^.*[\\/]/, ""),
-                retryInMilliseconds: delay,
-            });
-            const mappingStatus = await this.readMappingStatus(pdfPath);
-            if (mappingStatus) {
-                this.showMappingProgress(win, mappingStatus, pdfPath);
+        if (!retry) return;
+        if (retry.timerID != null) {
+            try {
+                retry.timerHost?.clearTimeout?.(retry.timerID);
             }
-            else {
-                // Do not fabricate an indefinite 0% card. A stale reader tab
-                // can keep retrying after another PDF is already ready.
-                this.hideMappingProgress(win, pdfPath);
+            catch (error) {
+                // The reader window may already be gone.
             }
-            return;
         }
         this.mapRetry.delete(reader);
-        this.hideMappingProgressForAttachment(pdfPath);
-        for (let attempt = 0; attempt < 30; attempt++) {
-            win = this.getViewerWindow(reader);
-            if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
-                if (!this.ensureResidentPageCache(win, pdfPath)) {
-                    await Zotero.Promise.delay(250);
-                    continue;
+        this.mapRetryEntries.delete(retry);
+    },
+
+    clearAllMapRetries() {
+        for (const retry of [...this.mapRetryEntries]) {
+            if (retry.timerID != null) {
+                try {
+                    retry.timerHost?.clearTimeout?.(retry.timerID);
                 }
-                this.ensureSelectionWatcher(win);
-                this.ensureClickWatcher(win, pdfPath, map);
-                this.hideMappingProgressForAttachment(pdfPath, win);
-                this.showMappingProgress(win, {
-                    mappingProgress: 100,
-                    mappingStage: "句子映射已就绪",
-                    mappingDetail: "现在可以单击任一侧句子联动。",
-                }, pdfPath);
-                this.readyReaders.add(reader);
-                this.readyReaderWindows.set(reader, win);
-                await this.runSingleClickSmokeTest(win, map);
+                catch (error) {
+                    // The reader window may already be gone.
+                }
+            }
+            if (retry.reader) this.mapRetry.delete(retry.reader);
+        }
+        this.mapRetryEntries.clear();
+    },
+
+    scheduleMapRetry(reader, delay, attempts) {
+        let retry = this.mapRetry.get(reader);
+        if (!retry) retry = { reader, attempts: 0, timerID: null, timerHost: null, at: 0 };
+        if (retry.timerID != null) {
+            try {
+                retry.timerHost?.clearTimeout?.(retry.timerID);
+            }
+            catch (error) {
+                // The old reader window may already be gone.
+            }
+        }
+        retry.attempts = attempts;
+        retry.at = Date.now() + delay;
+        retry.timerID = null;
+        // Use the main window when available so closing a reader cannot silently
+        // cancel the timer and leave an unreachable retry entry behind.
+        retry.timerHost = Zotero.getMainWindow?.() || this.getViewerWindow(reader) || null;
+        this.mapRetry.set(reader, retry);
+        this.mapRetryEntries.add(retry);
+        if (!retry.timerHost?.setTimeout) return retry;
+        retry.timerID = retry.timerHost.setTimeout(() => {
+            retry.timerID = null;
+            retry.at = 0;
+            if (!this.active || !this.getViewerWindow(reader)) {
+                this.clearMapRetry(reader);
                 return;
             }
-            await Zotero.Promise.delay(250);
+            this.prepareSingleClick(reader).catch(error => {
+                Zotero.logError(error);
+                Zotero.debug("[BilingualSync] scheduled map retry failed: " + error);
+            });
+        }, delay);
+        return retry;
+    },
+
+    async prepareSingleClick(reader) {
+        if (!reader || this.ignoredReaders.has(reader)) return;
+        const pendingRetry = this.mapRetry.get(reader);
+        if (pendingRetry?.timerID != null || pendingRetry?.at > Date.now()) return;
+        if (this.preparingReaders.has(reader)) return;
+        this.preparingReaders.add(reader);
+        try {
+            const pdfPath = await this.getAttachmentPath(reader);
+            if (!pdfPath) {
+                this.clearMapRetry(reader);
+                return;
+            }
+            const label = pdfPath + " " + (reader?._item?.getField?.("title") || "");
+            if (!/(compare|dual)/i.test(label)) {
+                this.clearMapRetry(reader);
+                this.ignoredReaders.add(reader);
+                return;
+            }
+            let win = this.getViewerWindow(reader);
+            if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
+                this.ensureResidentPageCache(win, pdfPath);
+            }
+            const retry = this.mapRetry.get(reader);
+            const map = await this.loadMap(pdfPath);
+            if (!map) {
+                const attempts = (retry?.attempts || 0) + 1;
+                const delay = Math.min(5000, 1000 * (2 ** Math.min(attempts - 1, 3)));
+                await this.writeStatus?.({
+                    state: "waiting-for-sentence-map",
+                    attachment: pdfPath.replace(/^.*[\\/]/, ""),
+                    retryInMilliseconds: delay,
+                });
+                const mappingStatus = await this.readMappingStatus(pdfPath);
+                if (!this.active) return;
+                if (mappingStatus) {
+                    this.showMappingProgress(win, mappingStatus, pdfPath);
+                }
+                else {
+                    this.showMapUnavailable(win, pdfPath);
+                }
+                this.scheduleMapRetry(reader, delay, attempts);
+                return;
+            }
+            this.clearMapRetry(reader);
+            this.hideMappingProgressForAttachment(pdfPath);
+            for (let attempt = 0; attempt < 30; attempt++) {
+                if (!this.active) return;
+                win = this.getViewerWindow(reader);
+                if (win?.document?.body && win.PDFViewerApplication?.pdfViewer) {
+                    if (!this.ensureResidentPageCache(win, pdfPath)) {
+                        await Zotero.Promise.delay(250);
+                        continue;
+                    }
+                    this.ensureSelectionWatcher(win);
+                    this.ensureClickWatcher(win, pdfPath, map);
+                    this.hideMappingProgressForAttachment(pdfPath, win);
+                    this.showMappingProgress(win, {
+                        mappingProgress: 100,
+                        mappingStage: "句子映射已就绪",
+                        mappingDetail: "现在可以单击任一侧句子联动。",
+                    }, pdfPath);
+                    this.readyReaders.add(reader);
+                    this.readyReaderWindows.set(reader, win);
+                    await this.runSingleClickSmokeTest(win, map);
+                    return;
+                }
+                await Zotero.Promise.delay(250);
+            }
+        }
+        finally {
+            this.preparingReaders.delete(reader);
         }
     },
 
@@ -1208,6 +1408,7 @@ var BilingualSync = {
         const compareMode = /(compare|dual)/i.test(label);
         const map = await this.loadMap(pdfPath);
         if (!map) return;
+        this.clearMapRetry(reader);
         const win = this.getViewerWindow(reader);
         if (!win) return;
         this.ensureSelectionWatcher(win);

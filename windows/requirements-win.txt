@@ -1,0 +1,14 @@
+# Windows x64 / CPython 3.12 runtime pins resolved on 2026-08-16.
+# Transitive packages are additionally bounded by install.ps1's exclude-newer cutoff.
+argparse==1.4.0
+babeldoc==0.6.2
+fastembed==0.8.0
+flask==3.1.3
+huggingface-hub==1.27.0
+numpy==2.5.2
+onnxruntime==1.28.0
+packaging==26.3
+pdf2zh-next==2.9.0
+pymupdf==1.25.2
+pypdf==6.16.1
+toml==0.10.2

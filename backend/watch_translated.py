@@ -6,16 +6,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from prepare_sidecar import prepare
+from repair_caption_overlap import repair_pdf
 
 
 SUPPORTED_SUFFIXES = (".compare.pdf", ".lr_dual.pdf", ".dual.pdf")
-EXCLUDED_MARKERS = (".tb_dual.pdf", ".mono.pdf", "crop-compare")
+EXCLUDED_MARKERS = (
+    ".tb_dual.pdf",
+    ".mono.pdf",
+    "crop-compare",
+    ".caption-repair-",
+    ".blr-caption-repair-",
+)
 
 
 class SourceChangedDuringBuild(RuntimeError):
@@ -66,6 +74,17 @@ class Observation:
     first_stable_at: float
 
 
+def caption_repair_temp(pdf: Path) -> Path:
+    """Reserve a same-directory, non-candidate path for an atomic repair."""
+    descriptor, name = tempfile.mkstemp(
+        prefix=".blr-caption-repair-",
+        suffix=".tmp.pdf",
+        dir=pdf.parent,
+    )
+    os.close(descriptor)
+    return Path(name)
+
+
 class SidecarWatcher:
     def __init__(
         self,
@@ -74,18 +93,23 @@ class SidecarWatcher:
         status_path: Path,
         model: str,
         stable_seconds: float,
+        repair_captions: bool = True,
     ) -> None:
         self.translated_dir = translated_dir
         self.cache_dir = cache_dir
         self.status_path = status_path
         self.model = model
         self.stable_seconds = max(0.0, stable_seconds)
+        self.repair_captions = repair_captions
         self.observations: dict[Path, Observation] = {}
-        self.failures: dict[Path, tuple[int, float]] = {}
+        self.failures: dict[Path, tuple[int, float, str]] = {}
         self.status = {
+            "schemaVersion": 1,
             "state": "starting",
+            "watcherPid": os.getpid(),
             "startedAt": utc_now(),
             "translatedDir": str(translated_dir),
+            "captionRepairEnabled": repair_captions,
             "processed": 0,
             "skipped": 0,
             "failed": 0,
@@ -101,6 +125,7 @@ class SidecarWatcher:
         paths = sorted(path for path in self.translated_dir.iterdir() if is_candidate(path))
         live = set(paths)
         self.observations = {path: value for path, value in self.observations.items() if path in live}
+        self.failures = {path: value for path, value in self.failures.items() if path in live}
         ready: list[Path] = []
         valid_existing = 0
         for path in paths:
@@ -109,22 +134,93 @@ class SidecarWatcher:
             valid = read_valid_map(sidecar, path)
             if valid and sidecar.stat().st_mtime_ns >= stat.st_mtime_ns:
                 valid_existing += 1
+                self.observations.pop(path, None)
+                self.failures.pop(path, None)
                 continue
             previous = self.observations.get(path)
             signature = (stat.st_size, stat.st_mtime_ns)
             if previous is None or (previous.size, previous.mtime_ns) != signature:
+                if previous is not None:
+                    # A rewritten PDF is a new input, so an error/backoff from
+                    # its previous contents must not delay the fresh version.
+                    self.failures.pop(path, None)
                 self.observations[path] = Observation(*signature, now)
                 if self.stable_seconds == 0:
                     ready.append(path)
                 continue
             if now - previous.first_stable_at < self.stable_seconds:
                 continue
-            attempts, retry_at = self.failures.get(path, (0, 0.0))
+            attempts, retry_at, _ = self.failures.get(path, (0, 0.0, ""))
             if retry_at > now:
                 continue
             ready.append(path)
         self.status["validExisting"] = valid_existing
         return ready
+
+    def repair_caption_layout(self, pdf: Path) -> dict:
+        outcome = {
+            "enabled": self.repair_captions,
+            "detectedCount": 0,
+            "repairedCount": 0,
+            "skippedCount": 0,
+            "sourceReplaced": False,
+            "warning": None,
+        }
+        if not self.repair_captions:
+            return outcome
+
+        temporary = caption_repair_temp(pdf)
+        try:
+            source_before = pdf.stat()
+            summary = repair_pdf(
+                pdf,
+                temporary,
+                dry_run=False,
+                selected_pages=None,
+                overwrite=True,
+            )
+            outcome["detectedCount"] = int(summary.get("detected_count", 0))
+            planned_repairs = int(summary.get("repaired_count", 0))
+            skipped = summary.get("skipped") or []
+            outcome["skippedCount"] = len(skipped)
+
+            source_after = pdf.stat()
+            source_unchanged = (
+                source_before.st_size,
+                source_before.st_mtime_ns,
+            ) == (
+                source_after.st_size,
+                source_after.st_mtime_ns,
+            )
+            if planned_repairs and not source_unchanged:
+                outcome["warning"] = (
+                    "PDF 在图片说明排版检查期间发生变化，已丢弃临时修复，"
+                    "并继续使用最新文件生成句子映射。"
+                )
+            elif planned_repairs:
+                os.replace(temporary, pdf)
+                outcome["repairedCount"] = planned_repairs
+                outcome["sourceReplaced"] = True
+
+            if skipped:
+                reasons = sorted(
+                    {str(item.get("reason") or "unknown") for item in skipped}
+                )
+                skipped_warning = (
+                    f"图片说明排版修复跳过 {len(skipped)} 处"
+                    f"（{', '.join(reasons)}），句子映射仍将继续。"
+                )
+                if outcome["warning"]:
+                    outcome["warning"] += " " + skipped_warning
+                else:
+                    outcome["warning"] = skipped_warning
+        except Exception as error:
+            outcome["warning"] = (
+                f"图片说明排版修复失败：{error}；句子映射仍将继续。"
+            )
+        finally:
+            temporary.unlink(missing_ok=True)
+        return outcome
 
     def process(self, pdf: Path) -> dict:
         sidecar = Path(str(pdf) + ".bilingual.json")
@@ -133,9 +229,20 @@ class SidecarWatcher:
         self.write_status(
             state="processing",
             currentFile=pdf.name,
+            completedFile=None,
+            lastDeferredFile=None,
+            lastFailedFile=None,
+            lastError=None,
+            retryInSeconds=None,
+            captionRepairWarning=None,
+            captionRepairCount=0,
+            captionRepairSkippedCount=0,
+            captionRepairResult=None,
             lastStartedAt=utc_now(),
             mappingProgress=1,
-            mappingStage="准备句子映射",
+            mappingStage=(
+                "检查图片说明排版" if self.repair_captions else "准备句子映射"
+            ),
             mappingDetail=None,
         )
         last_progress = -1
@@ -155,8 +262,21 @@ class SidecarWatcher:
                 mappingDetail=detail,
             )
 
+        if self.repair_captions:
+            report_progress(2, "检查图片说明排版", "检测并安全重排交叠的图注或表注。")
+        caption_repair = self.repair_caption_layout(pdf)
+        self.write_status(
+            captionRepairWarning=caption_repair["warning"],
+            captionRepairCount=caption_repair["repairedCount"],
+            captionRepairSkippedCount=caption_repair["skippedCount"],
+            captionRepairResult=caption_repair,
+        )
+        report_progress(4, "准备句子映射", caption_repair["warning"])
+
+        # Snapshot only after the optional atomic caption repair, so the map is
+        # always generated from the exact PDF version retained on disk.
         before = pdf.stat()
-        result = prepare(
+        mapping_result = prepare(
             None,
             None,
             pdf,
@@ -167,6 +287,13 @@ class SidecarWatcher:
             True,
             report_progress,
         )
+        result = {
+            **mapping_result,
+            "captionRepairCount": caption_repair["repairedCount"],
+            "captionRepairSkippedCount": caption_repair["skippedCount"],
+        }
+        if caption_repair["warning"]:
+            result["captionRepairWarning"] = caption_repair["warning"]
         after = pdf.stat()
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
             building.unlink(missing_ok=True)
@@ -189,6 +316,7 @@ class SidecarWatcher:
             )
         os.replace(building, sidecar)
         self.failures.pop(pdf, None)
+        self.observations.pop(pdf, None)
         self.status["processed"] = int(self.status["processed"]) + 1
         self.write_status(
             state="ready",
@@ -200,6 +328,10 @@ class SidecarWatcher:
             lastCompletedAt=utc_now(),
             lastOutput=str(sidecar),
             lastResult=result,
+            captionRepairWarning=caption_repair["warning"],
+            captionRepairCount=caption_repair["repairedCount"],
+            captionRepairSkippedCount=caption_repair["skippedCount"],
+            captionRepairResult=caption_repair,
         )
         return result
 
@@ -214,27 +346,59 @@ class SidecarWatcher:
             except SourceChangedDuringBuild as error:
                 self.write_status(
                     state="waiting-stable",
-                    currentFile=None,
+                    currentFile=pdf.name,
+                    completedFile=None,
                     mappingProgress=0,
                     mappingStage="等待 PDF 写入完成",
+                    mappingDetail=str(error),
                     lastDeferredFile=pdf.name,
                     lastDeferredReason=str(error),
                 )
             except Exception as error:
-                attempts = self.failures.get(pdf, (0, 0.0))[0] + 1
+                attempts = self.failures.get(pdf, (0, 0.0, ""))[0] + 1
                 delay = min(300.0, 5.0 * (2 ** min(attempts - 1, 6)))
-                self.failures[pdf] = (attempts, time.monotonic() + delay)
+                self.failures[pdf] = (attempts, time.monotonic() + delay, str(error))
                 self.status["failed"] = int(self.status["failed"]) + 1
                 self.write_status(
                     state="retry-wait",
-                    currentFile=None,
+                    currentFile=pdf.name,
+                    completedFile=None,
                     mappingStage="映射生成失败，准备重试",
+                    mappingDetail=str(error),
                     lastFailedFile=pdf.name,
                     lastError=str(error),
                     retryInSeconds=delay,
                 )
-        if not ready and self.status.get("state") != "retry-wait":
-            self.write_status(state="idle", currentFile=None)
+        if self.failures:
+            failed, (attempts, retry_at, error) = min(
+                self.failures.items(), key=lambda item: item[1][1]
+            )
+            retry_in = max(0.0, retry_at - time.monotonic())
+            self.write_status(
+                state="retry-wait",
+                currentFile=failed.name,
+                completedFile=None,
+                mappingProgress=0,
+                mappingStage="映射生成失败，准备重试",
+                mappingDetail=error,
+                lastFailedFile=failed.name,
+                lastError=error,
+                retryAttempt=attempts,
+                retryInSeconds=round(retry_in, 1),
+            )
+        elif not ready:
+            pending = min(self.observations, default=None)
+            if pending is not None:
+                self.write_status(
+                    state="waiting-stable",
+                    currentFile=pending.name,
+                    completedFile=None,
+                    mappingProgress=0,
+                    mappingStage="等待 PDF 写入完成",
+                    mappingDetail=f"将在文件稳定 {self.stable_seconds:g} 秒后开始映射。",
+                )
+            else:
+                self.write_status(state="idle", currentFile=None)
         return dict(self.status)
 
 
@@ -244,8 +408,13 @@ def main() -> None:
     parser.add_argument("--cache-dir", type=Path, required=True)
     parser.add_argument("--status", type=Path, required=True)
     parser.add_argument("--model", default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    parser.add_argument("--poll-seconds", type=float, default=2.0)
+    parser.add_argument("--poll-seconds", type=float, default=15.0)
     parser.add_argument("--stable-seconds", type=float, default=12.0)
+    parser.add_argument(
+        "--no-repair-captions",
+        action="store_true",
+        help="skip automatic repair of geometrically overlapping PDF captions",
+    )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     args.translated_dir.mkdir(parents=True, exist_ok=True)
@@ -255,6 +424,7 @@ def main() -> None:
         args.status,
         args.model,
         0.0 if args.once else args.stable_seconds,
+        not args.no_repair_captions,
     )
     if args.once:
         print(json.dumps(watcher.run_once(settle=True), ensure_ascii=False))

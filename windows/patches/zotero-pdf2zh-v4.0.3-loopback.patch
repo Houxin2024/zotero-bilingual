@@ -1,0 +1,5 @@
+--- a/server/server.py
++++ b/server/server.py
+@@ -944 +944 @@ class PDFTranslator:
+-        self.app.run(host='0.0.0.0', port=port, debug=debug)
++        self.app.run(host='127.0.0.1', port=port, debug=debug)
