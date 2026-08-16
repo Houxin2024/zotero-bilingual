@@ -1,15 +1,21 @@
 # Zotero Bilingual PDF Reader
 
-<p align="center"><strong>Click a sentence. See its translation.</strong></p>
-
-<p align="center">
-  One-click, layout-preserving academic PDF translation for Zotero.<br>
-  Click any sentence to highlight its bilingual counterpart—free by default, no API key required.
-</p>
+<p align="center"><strong>Create layout-preserving, side-by-side bilingual PDFs in Zotero; click any sentence to highlight its counterpart.</strong></p>
 
 <p align="center">
   <a href="README.md">简体中文</a> · <a href="README_EN.md">English</a>
 </p>
+
+<p align="center">
+  <img src="docs/assets/showcase/dreamx-phi-layout.png" width="1000" alt="A real DreamX-Phi page translated into a side-by-side bilingual PDF">
+</p>
+
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="A real bilingual PDF page with a framework figure"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="Linked sentence highlighting in a real side-by-side bilingual PDF"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="Real bilingual PDF tables and equations"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="A real bilingual PDF with a complex figure and equations"></p>
+
+<p align="center"><sub>All examples are real translated paper pages shown only to demonstrate layout preservation. Copyright remains with their respective authors.</sub></p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Zotero-7--9-CC2936" alt="Zotero 7–9">
@@ -23,20 +29,6 @@
   · <a href="docs/windows-one-click.md">Setup guide (Chinese)</a>
   · <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/issues">Report an issue</a>
 </p>
-
-<p align="center">
-  <img src="docs/assets/linked-selection-demo.gif" width="1000" alt="Click a sentence in a bilingual Zotero PDF to highlight its translation">
-</p>
-
-Right-click an academic PDF in Zotero to create a bilingual, side-by-side document that preserves the original page structure. The translated PDF is attached to the original Zotero item automatically. Once sentence mapping is ready, click either language to highlight its counterpart.
-
-## Why use it?
-
-- **Preserves the paper layout:** formulas, figures, tables, headings, and references stay where you expect them.
-- **Links sentences both ways:** English to Chinese and Chinese to English, while native selection, copying, and annotation keep working.
-- **Works without an API key:** new installations default to **SiliconFlow Free**; you can switch to your own API or a local service.
-- **One-click Windows backend:** no administrator access, WSL, Conda, or preinstalled Python required.
-- **Repairs common caption collisions:** overlapping Figure/Table captions are detected and safely reflowed before sentence mapping.
 
 ## Get started in four steps
 
@@ -56,24 +48,6 @@ The first setup downloads a private Python runtime, PDF2zh Next, and the local s
 2. Choose `PDF2zh → Translate` from the context menu.
 3. The bilingual PDF is attached and opened automatically; mapping progress appears in the lower-right corner.
 4. When mapping is ready, click any sentence to read its match.
-
-## Real paper layouts
-
-<p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-layout.png" width="1000" alt="A layout-preserving bilingual DreamX-Phi paper page">
-</p>
-
-<details>
-<summary><strong>More real pages: figures, body text, tables, and equations</strong></summary>
-
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="Bilingual paper page with a framework figure"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="Linked highlighting on a bilingual paper page"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="Bilingual tables and equations"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="Bilingual complex figure and equations"></p>
-
-</details>
-
-<p align="center"><sub>Paper pages are shown only to demonstrate layout preservation. Copyright remains with their respective authors.</sub></p>
 
 ## Privacy
 

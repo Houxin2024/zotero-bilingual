@@ -1,15 +1,21 @@
-# Zotero Bilingual PDF Reader｜Zotero 双语论文阅读器
+# Zotero Bilingual PDF Reader｜Zotero 中英双栏 PDF 阅读器
 
-<p align="center"><strong>点哪句，亮哪句。Zotero 里的排版保真双语论文阅读。</strong></p>
-
-<p align="center">
-  一键翻译整篇论文，保留公式、图表与原始排版；单击任一句，中英对应句同步高亮。<br>
-  <em>One-click, layout-preserving academic PDF translation with linked bilingual highlighting.</em>
-</p>
+<p align="center"><strong>在 Zotero 中一键生成保留原排版的中英双栏 PDF；单击任一句，对应译句同步高亮。</strong></p>
 
 <p align="center">
   <a href="README.md">简体中文</a> · <a href="README_EN.md">English</a>
 </p>
+
+<p align="center">
+  <img src="docs/assets/showcase/dreamx-phi-layout.png" width="1000" alt="DreamX-Phi 论文首页的中英双栏 PDF">
+</p>
+
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="DreamX-Phi 框架图与正文的中英双栏 PDF"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="DreamX-Phi 中英双栏 PDF 的对应句同步高亮"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="DreamX-Phi 表格、公式与方法章节的中英双栏 PDF"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="DreamX-Phi 复杂框架图与公式的中英双栏 PDF"></p>
+
+<p align="center"><sub>以上均为真实论文翻译页面，仅用于展示排版效果；论文内容与版权归各自作者所有。</sub></p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Zotero-7--9-CC2936" alt="Zotero 7–9">
@@ -23,20 +29,6 @@
   · <a href="docs/windows-one-click.md">安装说明</a>
   · <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/issues">问题反馈</a>
 </p>
-
-<p align="center">
-  <img src="docs/assets/linked-selection-demo.gif" width="1000" alt="在 Zotero 双语 PDF 中单击一句，同步高亮对应译句">
-</p>
-
-在 Zotero 中右键一篇英文论文，即可生成保留原页面结构的中英双栏 PDF。翻译结果会自动附加回原条目；句子映射完成后，点击中文或英文都能立即找到另一侧的对应句。
-
-## 为什么用它
-
-- **保留论文排版**：公式、图表、表格、目录和标题层级继续留在熟悉的位置。
-- **双向句子联动**：英文点中文、中文点英文；双击、拖选、复制和批注仍使用 Zotero 原生行为。
-- **默认即可翻译**：新安装使用 **SiliconFlow Free**，不需要 API Key；也可切换到自己的 API 或本地服务。
-- **Windows 一键后台**：不需要管理员权限、WSL、Conda 或预装 Python，安装后默认随登录自动启动。
-- **修复特定图注重叠**：检测并重排翻译后真正发生重叠的 Figure/Table 编号与说明，再生成句子映射。
 
 ## 四步开始使用
 
@@ -56,24 +48,6 @@
 2. 右键选择 `PDF2zh → 翻译`。
 3. 双栏 PDF 自动附加并打开；右下角显示句子映射进度。
 4. 提示“句子映射已就绪”后，单击任一句即可联动阅读。
-
-## 真实论文排版展示
-
-<p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-layout.png" width="1000" alt="DreamX-Phi 论文首页的中英双栏排版">
-</p>
-
-<details>
-<summary><strong>查看更多真实论文页面：框架图、正文、表格和公式</strong></summary>
-
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="DreamX-Phi 框架图与正文的中英双栏排版"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="DreamX-Phi 正文与中英句子联动高亮"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="DreamX-Phi 表格、公式与方法章节的中英双栏排版"></p>
-<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="DreamX-Phi 复杂框架图与公式的中英双栏排版"></p>
-
-</details>
-
-<p align="center"><sub>真实论文页面仅用于展示排版效果；论文内容与版权归各自作者所有。</sub></p>
 
 ## 隐私说明
 
