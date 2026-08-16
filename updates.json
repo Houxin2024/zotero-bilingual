@@ -4,7 +4,7 @@
       "updates": [
         {
           "version": "0.9.3",
-          "update_link": "https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi",
+          "update_link": "https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi",
           "update_hash": "sha256:6450d9fe77da5c0b8f099c720188bb1e77c8c9e9055377c7f2014affaa8d2fd6",
           "applications": {
             "zotero": {

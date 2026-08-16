@@ -20,19 +20,19 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Zotero-7--9-CC2936" alt="Zotero 7–9">
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4" alt="Windows 10/11">
-  <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/latest"><img src="https://img.shields.io/github/v/release/Houxin2024/zotero-bilingual-linked-reader?label=release" alt="Latest release"></a>
+  <a href="https://github.com/Houxin2024/zotero-bilingual/releases/latest"><img src="https://img.shields.io/github/v/release/Houxin2024/zotero-bilingual?label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/core%20license-MIT-blue" alt="Core license MIT">
 </p>
 
 <p align="center">
-  <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip"><strong>⬇️ Download the Windows installer v0.9.3</strong></a>
+  <a href="https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip"><strong>⬇️ Download the Windows installer v0.9.3</strong></a>
   · <a href="docs/windows-one-click.md">Advanced setup guide (Chinese)</a>
-  · <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/issues">Report an issue</a>
+  · <a href="https://github.com/Houxin2024/zotero-bilingual/issues">Report an issue</a>
 </p>
 
 ## Get started in four steps
 
-1. [Download the Windows package](https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip) and extract the ZIP completely.
+1. [Download the Windows package](https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip) and extract the ZIP completely.
 2. Double-click `Install-Windows.cmd` and wait for the green completion message.
 3. In Zotero, open `Tools → Add-ons → gear icon → Install Add-on From File...`, install both XPI files from the automatically opened `addons` folder, then restart Zotero.
 4. Right-click a paper and choose `PDF2zh → Translate`.
@@ -93,7 +93,7 @@ Regular Windows users do not need these instructions.
 
 - [Windows setup and troubleshooting (Chinese)](docs/windows-one-click.md)
 - [PDF2zh Server and sentence-map watcher integration](docs/pdf2zh-integration.md)
-- [Download only the Zotero Bilingual PDF Reader v0.9.3 XPI](https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi)
+- [Download only the Zotero Bilingual PDF Reader v0.9.3 XPI](https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi)
 
 ```bash
 # Build the XPI

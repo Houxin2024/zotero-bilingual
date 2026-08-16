@@ -20,19 +20,19 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Zotero-7--9-CC2936" alt="Zotero 7–9">
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4" alt="Windows 10/11">
-  <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/latest"><img src="https://img.shields.io/github/v/release/Houxin2024/zotero-bilingual-linked-reader?label=release" alt="Latest release"></a>
+  <a href="https://github.com/Houxin2024/zotero-bilingual/releases/latest"><img src="https://img.shields.io/github/v/release/Houxin2024/zotero-bilingual?label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/core%20license-MIT-blue" alt="Core license MIT">
 </p>
 
 <p align="center">
-  <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip"><strong>⬇️ 下载 Windows 一键安装包 v0.9.3</strong></a>
+  <a href="https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip"><strong>⬇️ 下载 Windows 一键安装包 v0.9.3</strong></a>
   · <a href="docs/windows-one-click.md">高级安装说明</a>
-  · <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/issues">问题反馈</a>
+  · <a href="https://github.com/Houxin2024/zotero-bilingual/issues">问题反馈</a>
 </p>
 
 ## 四步开始使用
 
-1. [下载 Windows 安装包](https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip)，右键选择“全部解压”。
+1. [下载 Windows 安装包](https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip)，右键选择“全部解压”。
 2. 双击 `Install-Windows.cmd`，等待绿色的安装完成提示。
 3. 在 Zotero 中打开 `工具 → 插件 → 右上角齿轮 → Install Add-on From File...`，从自动打开的 `addons` 文件夹分别安装两个 XPI，然后重启 Zotero。
 4. 选中论文 PDF，右键选择 `PDF2zh → 翻译`。
@@ -100,7 +100,7 @@ PDF 会先返回 Zotero，随后本地后台生成句子映射。右下角会依
 
 - [Windows 安装器、参数与故障排查](docs/windows-one-click.md)
 - [PDF2zh Server 与句子映射 watcher 集成](docs/pdf2zh-integration.md)
-- [仅下载 Zotero Bilingual PDF Reader v0.9.3 XPI](https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi)
+- [仅下载 Zotero Bilingual PDF Reader v0.9.3 XPI](https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi)
 
 ```bash
 # 构建 XPI
