@@ -10,10 +10,10 @@
 4. 脚本会打开 `addons` 文件夹。在 Zotero 中打开“工具 → 插件 → 齿轮 → Install Add-on From File...”，分别安装：
    - `zotero-pdf2zh-*.xpi`
    - `bilingual-linked-reader-*.xpi`
-5. 重启 Zotero，打开 PDF2zh 设置，选择翻译服务并填写该服务需要的配置。
+5. 重启 Zotero。新安装默认使用 SiliconFlow Free，不需要 API Key；如需其他服务，再到 PDF2zh 设置中切换并填写相应配置。
 6. 右键一篇 PDF → `PDF2zh` → 翻译。双栏 PDF 打开后，右下角会显示句对映射进度；完成后单击任意一侧句子即可联动高亮。
 
-Zotero 的扩展安装确认和第三方翻译服务设置无法由普通脚本安全地代替用户完成。这两部分只需配置一次。
+Zotero 的扩展安装确认无法由普通脚本安全地代替用户完成。默认免费翻译可直接使用；只有切换到其他提供商时才需要额外配置。
 
 ## 安装器会做什么
 
@@ -43,7 +43,7 @@ Zotero 的扩展安装确认和第三方翻译服务设置无法由普通脚本�
 powershell -ExecutionPolicy Bypass -File windows\install.ps1 -Port 8891
 ```
 
-然后在 PDF2zh 设置中把 Server 地址设为 `http://127.0.0.1:8891`。Bilingual Linked Reader 在未显式设置自己地址时会继承该地址。
+然后在 PDF2zh 设置中把 Server 地址设为 `http://127.0.0.1:8891`。Zotero Bilingual PDF Reader 在未显式设置自己地址时会继承该地址。
 
 ## 高级参数
 

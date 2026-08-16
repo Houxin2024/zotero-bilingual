@@ -1,147 +1,152 @@
-# Zotero Bilingual Linked Reader
+# Zotero Bilingual PDF Reader｜Zotero 双语论文阅读器
 
-在 Zotero 的左右双栏中英 PDF 中，单击任一句，立即高亮另一栏对应译句。双击和拖选仍保留 Zotero 原生复制、批注行为。
-
-![Zotero](https://img.shields.io/badge/Zotero-7--9-CC2936)
-![License](https://img.shields.io/badge/license-MIT-blue)
-
-## 效果展示
-
-双栏输出保留原论文的页面结构、公式、图表和标题层级；中文与英文仍处于相同的页面位置，便于逐页对照。
+<p align="center"><strong>点哪句，亮哪句。Zotero 里的排版保真双语论文阅读。</strong></p>
 
 <p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-layout.png" width="1000" alt="DreamX-Phi 论文首页的中英双栏排版对照">
+  一键翻译整篇论文，保留公式、图表与原始排版；单击任一句，中英对应句同步高亮。<br>
+  <em>One-click, layout-preserving academic PDF translation with linked bilingual highlighting.</em>
 </p>
 
 <p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="DreamX-Phi 论文框架图与正文的中英双栏排版对照">
+  <a href="README.md">简体中文</a> · <a href="README_EN.md">English</a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="DreamX-Phi 论文正文与联动高亮的中英双栏排版对照">
+  <img src="https://img.shields.io/badge/Zotero-7--9-CC2936" alt="Zotero 7–9">
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4" alt="Windows 10/11">
+  <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/latest"><img src="https://img.shields.io/github/v/release/Houxin2024/zotero-bilingual-linked-reader?label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/core%20license-MIT-blue" alt="Core license MIT">
 </p>
 
 <p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="DreamX-Phi 论文表格、公式与方法章节的中英双栏排版对照">
+  <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip"><strong>⬇️ 下载 Windows 一键安装包 v0.9.3</strong></a>
+  · <a href="docs/windows-one-click.md">安装说明</a>
+  · <a href="https://github.com/Houxin2024/zotero-bilingual-linked-reader/issues">问题反馈</a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="DreamX-Phi 论文方法框架图与公式的中英双栏排版对照">
+  <img src="docs/assets/linked-selection-demo.gif" width="1000" alt="在 Zotero 双语 PDF 中单击一句，同步高亮对应译句">
 </p>
+
+在 Zotero 中右键一篇英文论文，即可生成保留原页面结构的中英双栏 PDF。翻译结果会自动附加回原条目；句子映射完成后，点击中文或英文都能立即找到另一侧的对应句。
+
+## 为什么用它
+
+- **保留论文排版**：公式、图表、表格、目录和标题层级继续留在熟悉的位置。
+- **双向句子联动**：英文点中文、中文点英文；双击、拖选、复制和批注仍使用 Zotero 原生行为。
+- **默认即可翻译**：新安装使用 **SiliconFlow Free**，不需要 API Key；也可切换到自己的 API 或本地服务。
+- **Windows 一键后台**：不需要管理员权限、WSL、Conda 或预装 Python，安装后默认随登录自动启动。
+- **修复特定图注重叠**：检测并重排翻译后真正发生重叠的 Figure/Table 编号与说明，再生成句子映射。
+
+## 四步开始使用
+
+1. [下载 Windows 安装包](https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip)，右键选择“全部解压”。
+2. 双击 `Install-Windows.cmd`，等待绿色的安装完成提示。
+3. 在 Zotero 中打开 `工具 → 插件 → 右上角齿轮 → Install Add-on From File...`，从自动打开的 `addons` 文件夹分别安装两个 XPI，然后重启 Zotero。
+4. 选中论文 PDF，右键选择 `PDF2zh → 翻译`。
+
+> [!TIP]
+> 新安装默认使用 **SiliconFlow Free**，无需注册或填写 API Key。它是联网的第三方免费服务，可能限速；敏感论文建议切换到自己的 API 或本地服务。
+
+首次安装会下载私有 Python 运行环境、PDF2zh Next 和本地句子映射模型，通常需要数分钟，并建议预留 2–3 GB 磁盘空间。安装完成后，日常不需要再次运行 Python、移动 PDF 或手动启动服务。
+
+## 日常使用
+
+1. 在 Zotero 选中原论文或其 PDF。
+2. 右键选择 `PDF2zh → 翻译`。
+3. 双栏 PDF 自动附加并打开；右下角显示句子映射进度。
+4. 提示“句子映射已就绪”后，单击任一句即可联动阅读。
+
+## 真实论文排版展示
+
+<p align="center">
+  <img src="docs/assets/showcase/dreamx-phi-layout.png" width="1000" alt="DreamX-Phi 论文首页的中英双栏排版">
+</p>
+
+<details>
+<summary><strong>查看更多真实论文页面：框架图、正文、表格和公式</strong></summary>
+
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-2-layout.png" width="1000" alt="DreamX-Phi 框架图与正文的中英双栏排版"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-3-layout.png" width="1000" alt="DreamX-Phi 正文与中英句子联动高亮"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-4-layout.png" width="1000" alt="DreamX-Phi 表格、公式与方法章节的中英双栏排版"></p>
+<p align="center"><img src="docs/assets/showcase/dreamx-phi-page-5-layout.png" width="1000" alt="DreamX-Phi 复杂框架图与公式的中英双栏排版"></p>
+
+</details>
 
 <p align="center"><sub>真实论文页面仅用于展示排版效果；论文内容与版权归各自作者所有。</sub></p>
 
-## Windows 一键安装（推荐）
+## 隐私说明
 
-[下载 Windows 一键安装包 v0.9.2](https://github.com/Houxin2024/zotero-bilingual-linked-reader/raw/refs/heads/main/dist/bilingual-linked-reader-0.9.2-windows.zip)
+PDF 解析、版面坐标提取、图注修复和句子映射都在本机完成。Windows 后台只监听 `127.0.0.1`，本项目作者的服务器不会接收你的论文、译文或 API Key。
 
-1. 下载 `bilingual-linked-reader-0.9.2-windows.zip` 并完整解压。
-2. 双击 `Install-Windows.cmd`；不需要管理员权限、WSL 或预先安装 Python。
-3. 安装程序会打开一个文件夹。在 Zotero 里分别安装其中的两个 XPI，然后重启 Zotero。
-4. 在 PDF2zh 设置中选择翻译服务并配置它所需的 API Key（如果有）。
+翻译文本会发送给你选择的翻译服务。默认的 SiliconFlow Free 是第三方联网服务；对于未发表、保密或敏感论文，请改用你信任的 API 或本地翻译服务。
 
-安装后本地后端会立即启动，并默认在 Windows 登录后自动启动。日常使用只需在 Zotero 中右键翻译，不需要手动运行 Python。第一次安装会下载私有 Python 运行时、PDF2zh Next 和本地句对模型，建议预留 2–3 GB 空间。
+## 常见问题
 
-Zotero 不允许普通脚本无提示安装扩展，因此两次 XPI 确认和翻译服务配置仍需要用户完成一次。详细步骤、高级参数和故障排查见 [Windows 一键安装说明](docs/windows-one-click.md)。
+<details>
+<summary><strong>不配置翻译服务和 API Key，能直接用吗？</strong></summary>
 
-## 特点
+可以。新安装默认选择 PDF2zh Next 的 `SiliconFlow Free`，英文翻译为简体中文，不需要 API Key。如果免费服务暂时限速或不可用，可在 PDF2zh 设置中切换 Bing、Google、OpenAI、Gemini、Ollama 等服务。
 
-- 单击联动高亮，使用下一帧绘制，不人为等待双击超时。
-- 英文点中文、中文点英文，双向工作。
-- 语义句对 v4：先按横排/竖排方向隔离页边元数据，再用多语言语义动态规划做 1-to-1、1-to-many 和 many-to-1 对齐，避免摘要句子整体错位或被合并成大段高亮。
-- 与 Zotero PDF2zh 的 compare PDF 配合；新论文无需写死文件名。
-- 映射只读入一次，并按页建立索引；点击时不写磁盘。
-- PDF、翻译文本和 API Key 均不上传到插件作者服务器。
-- Windows 安装器会同时启动 PDF2zh Server 和 watcher；watcher 持续识别 `dual/LR_dual/compare` 输出，等待文件写稳后原子生成映射。
-- 映射期间在 Zotero 阅读器右下角显示真实阶段进度；配套 PDF2zh 任务页也会显示独立的“映射中”任务卡。
-- Zotero 晚启动、PDF 晚打开或后台映射稍后完成都能自动恢复，无需重装插件。
-- 页面渲染默认完全交还 Zotero 原生 PDF.js，插件不再拦截 `draw/reset/destroy` 生命周期，避免少数复杂页面出现空白或无法重试；双语单击联动与句对映射保持启用。
-- 自动关闭 PDF2zh 的富文本占位符翻译，避免 `<样式 id=...>`、`<风格 id=...>` 等内部标签泄漏进中文正文。
-- 自动检测 `Figure/Table/图/表 + 编号` 图注中真正相交的标题与正文；仅对命中的图注整体重排，避免中文变长后标题和说明叠字，并在修复后再生成句子映射。
+</details>
 
-## 日常使用（配置一次后）
+<details>
+<summary><strong>为什么需要安装两个 XPI？</strong></summary>
 
-1. 在 Zotero 选中原论文或其 PDF。
-2. 右键 → `PDF2zh` → 翻译。
-3. 双栏 PDF 自动附加回原条目并打开；右下角会显示映射进度，提示“已就绪”后直接单击任一句即可联动。
+`Zotero PDF2zh` 负责全文翻译、生成双栏 PDF 并附加回 Zotero；`Zotero Bilingual PDF Reader` 负责句子映射、进度提示和双向联动高亮。Zotero 出于安全考虑，需要用户分别确认安装扩展。
 
-使用 Windows 一键版后，日常不需要手动运行 Python、不需要移动 PDF，也不需要为新论文重新安装插件。
+</details>
 
-实验性的常驻画布缓存当前默认关闭。正常阅读使用 Zotero 自带的页面缓存；插件只负责双语句子联动，不接管 PDF 渲染状态机。
+<details>
+<summary><strong>翻译完成后为什么暂时还不能联动？</strong></summary>
 
-## 仅安装 XPI（已有后端时）
+PDF 会先返回 Zotero，随后本地后台生成句子映射。右下角会依次显示版面解析、语义编码和句子映射进度；首次运行可能稍慢，完成后会自动启用，无需重装或重新打开。
 
-1. [下载 Bilingual Linked Reader v0.9.2 XPI](https://github.com/Houxin2024/zotero-bilingual-linked-reader/raw/refs/heads/main/dist/bilingual-linked-reader-0.9.2.xpi)。
-2. Zotero → `工具` → `插件` → 右上角齿轮 → `Install Add-on From File...`。
-3. 选择 XPI 并重启 Zotero。
+</details>
 
-自行构建：
+<details>
+<summary><strong>每次打开 Zotero 都要手动启动后台吗？</strong></summary>
+
+不需要。Windows 一键版默认随 Windows 登录自动启动。若你手动停止过后台，可双击桌面的“Zotero 双语阅读器 - 启动”。
+
+</details>
+
+<details>
+<summary><strong>支持 macOS 或 Linux 吗？</strong></summary>
+
+当前一键安装包面向 Windows 10/11 x64。macOS 和 Linux 用户可以自行部署 PDF2zh Server 与本仓库的 watcher；欢迎参与跨平台打包。
+
+</details>
+
+<details>
+<summary><strong>出现 NetworkError 或 8890 端口冲突怎么办？</strong></summary>
+
+先运行桌面的启动和状态快捷方式。完整排查步骤及自定义端口方法见 [Windows 安装与故障排查](docs/windows-one-click.md)。
+
+</details>
+
+## 开发者与高级用法
+
+普通 Windows 用户不需要执行下面的命令。
+
+- [Windows 安装器、参数与故障排查](docs/windows-one-click.md)
+- [PDF2zh Server 与句子映射 watcher 集成](docs/pdf2zh-integration.md)
+- [仅下载 Zotero Bilingual PDF Reader v0.9.3 XPI](https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi)
 
 ```bash
+# 构建 XPI
 python scripts/build_xpi.py
+
+# 构建完整 Windows 包
+python scripts/build_windows_bundle.py
 ```
 
-## 手动给新论文生成句对映射
+## 上游项目与许可证
 
-先用 PDF2zh 生成：
+全文翻译与排版保留由 [Zotero PDF2zh](https://github.com/guaguastandup/zotero-pdf2zh)、[PDFMathTranslate-next](https://github.com/PDFMathTranslate-next/PDFMathTranslate-next) 和 [BabelDOC](https://github.com/funstory-ai/BabelDOC) 提供。本项目在其输出之上增加 Windows 一键后台、自动句子映射、联动高亮与图注重叠修复。
 
-- 原始英文 PDF
-- 中文 mono PDF
-- 左右双栏 compare PDF，或 PDF2zh Next 生成的 `LR_dual.pdf`
+仓库自身代码使用 MIT License。Windows 包内置或安装的上游组件保持各自的 AGPL、Apache-2.0 或商业双重授权条款，详见 [`windows/THIRD_PARTY_NOTICES.md`](windows/THIRD_PARTY_NOTICES.md)。
 
-然后执行：
+---
 
-```bash
-python -m venv .venv
-.venv/Scripts/pip install -r backend/requirements.txt
-.venv/Scripts/python backend/prepare_sidecar.py \
-  --compare paper.LR_dual.pdf
-```
-
-它会在 compare PDF 旁生成：
-
-```text
-paper.compare.pdf.bilingual.json
-```
-
-新版直接读取最终双栏 PDF，自动判断英文/中文位于左侧还是右侧，并在
-段落内对齐句子；不再依赖中间 mono PDF 的坐标。若输入是
-`paper.LR_dual.pdf`，sidecar 将相应命名为
-`paper.LR_dual.pdf.bilingual.json`，插件会自动识别两种形式。
-
-如果你使用本地 PDF2zh Server，推荐启动持久 watcher；参考 [PDF2zh 自动集成](docs/pdf2zh-integration.md)。PDF2zh 插件会把双栏 PDF 自动附加回原 Zotero 条目，本插件从本地服务器读取同名 sidecar。
-
-## 映射发现顺序
-
-插件按以下顺序寻找 `<PDF文件名>.bilingual.json`：
-
-1. Zotero PDF 附件旁边；
-2. `extensions.bilingualLinkedReader.mapDirectory` 指定目录；
-3. PDF2zh Server 的 `/translatedFile/` 接口。
-
-默认服务器地址是 `http://127.0.0.1:8890`。如果用户没有显式覆盖本插件地址，它会自动继承 PDF2zh 已配置的服务器地址。
-
-## 持续处理新论文
-
-下面的进程同时覆盖新生成的 `.dual.pdf`、`.LR_dual.pdf` 和 `.compare.pdf`：
-
-```bash
-.venv/Scripts/python backend/watch_translated.py \
-  --translated-dir path/to/pdf2zh/server/translated \
-  --cache-dir path/to/model-cache \
-  --status path/to/automation-status.json
-```
-
-它会等待 PDF 大小和修改时间稳定、使用临时文件生成映射、成功后原子替换；失败会记录状态并指数退避重试。重复启动或重复扫描不会重做仍然有效的映射。
-
-完整 Windows 包会自动处理这一步。仅在开发者已有自己的 PDF2zh Server 并希望单独启动 watcher 时，才需要调用 `integration/start_watcher.ps1`。
-
-## 隐私与开源边界
-
-仓库不包含论文 PDF、翻译结果、模型缓存、虚拟环境或 API Key。Windows 安装器生成的 HTTP 服务只监听 `127.0.0.1`，不向局域网暴露翻译或文件接口。语义模型在安装时下载到本地缓存。
-
-仓库自身代码使用 MIT License。Windows 包内置或安装的 Zotero PDF2zh、PDF2zh Next/BabelDOC 和 PyMuPDF 包含 AGPL 或双重授权组件；它们保持各自的上游许可证，详见 `windows/THIRD_PARTY_NOTICES.md`。
-
-## License
-
-MIT
+如果它改善了你的论文阅读体验，欢迎点一个 **Star**，也欢迎把它分享给需要双语精读的 Zotero 用户。

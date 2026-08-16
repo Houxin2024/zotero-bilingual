@@ -3,9 +3,9 @@
     "bilingual-linked-reader@houxin2024.github.io": {
       "updates": [
         {
-          "version": "0.9.2",
-          "update_link": "https://raw.githubusercontent.com/Houxin2024/zotero-bilingual-linked-reader/main/dist/bilingual-linked-reader-0.9.2.xpi",
-          "update_hash": "sha256:e942751daf7b820781f2b8ea9984fee50ee82c12589fb071b4f0b6bbe9e11f6e",
+          "version": "0.9.3",
+          "update_link": "https://github.com/Houxin2024/zotero-bilingual-linked-reader/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi",
+          "update_hash": "sha256:6450d9fe77da5c0b8f099c720188bb1e77c8c9e9055377c7f2014affaa8d2fd6",
           "applications": {
             "zotero": {
               "strict_min_version": "7.0",

@@ -1,4 +1,4 @@
-# Windows 一键安装
+# Zotero Bilingual PDF Reader - Windows 一键安装
 
 这个安装包面向 Windows 10/11 x64。它会安装本地 PDF2zh 翻译服务和双语句子映射后台；不需要 WSL、Conda、系统 Python 或管理员权限。
 
@@ -10,7 +10,7 @@
 4. 安装结束后会打开 `addons` 文件夹。在 Zotero 中打开“工具 → 插件”，分别安装文件夹中的：
    - `zotero-pdf2zh-*.xpi`
    - `bilingual-linked-reader-*.xpi`
-5. 重启 Zotero。之后右键论文 PDF，选择 PDF2zh 翻译即可。
+5. 重启 Zotero。之后右键论文 PDF，选择 PDF2zh 翻译即可。新安装默认使用 SiliconFlow Free，不需要 API Key。
 
 默认安装目录为：
 
@@ -56,7 +56,7 @@ watcher 会在映射前保守检查图片说明排版。只有 `Figure/Table/图
 Install-Windows.cmd -Port 8891
 ```
 
-随后在 Zotero 的 PDF2zh 和 Bilingual Linked Reader 设置中使用同一个本地地址。
+随后在 Zotero 的 PDF2zh 和 Zotero Bilingual PDF Reader 设置中使用同一个本地地址。
 
 ### 安装中断
 
@@ -64,7 +64,7 @@ Install-Windows.cmd -Port 8891
 
 ## 隐私与许可证
 
-PDF 解析、版面坐标提取和句子映射在本机完成。PDF2zh 中选择的翻译服务可能会把待翻译文本发送给相应第三方；请根据论文敏感性选择服务并阅读其数据条款。
+PDF 解析、版面坐标提取和句子映射在本机完成。默认的 SiliconFlow Free 无需 API Key，但会把待翻译文本发送给第三方联网服务；请根据论文敏感性选择服务并阅读其数据条款。
 
 本项目代码采用 MIT License。安装包内置或安装的 PDF2zh Server、PDFMathTranslate-next、BabelDOC、PyMuPDF 等组件有各自许可证；详见 `windows/THIRD_PARTY_NOTICES.md`。安装器使用固定上游版本并校验发布文件，且关闭上游的可变 `main` 自动更新。
 

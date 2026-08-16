@@ -109,7 +109,7 @@ foreach ($requiredBundleFile in @(
     }
 }
 
-Write-Host "Zotero Bilingual Linked Reader - Windows setup $BundleVersion" -ForegroundColor Cyan
+Write-Host "Zotero Bilingual PDF Reader - Windows setup $BundleVersion" -ForegroundColor Cyan
 Write-Host "Install root: $InstallRoot"
 Write-Host "Local service: http://127.0.0.1:$Port"
 Write-Host ""
@@ -303,7 +303,7 @@ foreach ($directory in @(
     New-Directory -Path $directory
 }
 
-Write-Host "Installing Bilingual Linked Reader backend files..."
+Write-Host "Installing Zotero Bilingual PDF Reader backend files..."
 foreach ($scriptName in @("common.ps1", "start.ps1", "stop.ps1", "status.ps1")) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $scriptName) -Destination (Join-Path $binDir $scriptName) -Force
 }
@@ -539,6 +539,9 @@ if (-not $NoShortcuts) {
     Write-Host "Creating shortcuts..."
     $desktop = [Environment]::GetFolderPath("Desktop")
     $programs = [Environment]::GetFolderPath("Programs")
+    # Keep the legacy folder identifier so an in-place upgrade does not leave
+    # duplicate Start Menu folders. The user-facing add-on name is defined in
+    # addon/manifest.json.
     $menuDir = Join-Path $programs "Zotero Bilingual Linked Reader"
     New-Shortcut `
         -Path (Join-Path $desktop "Zotero 双语阅读器 - 启动.lnk") `
@@ -551,7 +554,7 @@ if (-not $NoShortcuts) {
         -TargetPath $powerShellExe `
         -Arguments "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$statusScript`" -InstallRoot $quotedRoot" `
         -WorkingDirectory $InstallRoot `
-        -Description "Check Zotero Bilingual Linked Reader backend status"
+        -Description "Check Zotero Bilingual PDF Reader backend status"
     New-Shortcut `
         -Path (Join-Path $menuDir "启动后端.lnk") `
         -TargetPath $powerShellExe `
@@ -574,6 +577,7 @@ if (-not $NoShortcuts) {
 }
 
 $startup = [Environment]::GetFolderPath("Startup")
+# Keep the legacy startup filename so upgrades continue to own one entry.
 $autoStartShortcut = Join-Path $startup "Zotero Bilingual Linked Reader Backend.lnk"
 if ($autoStartEnabled) {
     New-Shortcut `

@@ -17,4 +17,4 @@ Stop-BlrOwnedProcess `
     -Label "PDF2zh Server" `
     -ExpectedExecutable $layout.PythonExe `
     -ExpectedCommandFragment "server.py"
-Write-Host "Zotero Bilingual Linked Reader backend is stopped."
+Write-Host "Zotero Bilingual PDF Reader backend is stopped."
