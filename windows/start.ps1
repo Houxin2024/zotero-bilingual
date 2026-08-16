@@ -124,19 +124,21 @@ else {
     Write-Host "PDF2zh Server is ready (version $healthVersion)."
 }
 
-$watcher = Get-BlrProcessFromPidFile `
+$watcherScript = Join-Path $layout.BackendDir "watch_translated.py"
+$watcher = Get-BlrOwnedWatcherProcess `
     -PidFile $layout.WatcherPid `
-    -InstallRoot $layout.Root `
-    -ExpectedExecutable $layout.PythonExe `
-    -ExpectedCommandFragment "watch_translated.py"
+    -WatcherScript $watcherScript `
+    -StatusPath $layout.MappingStatus `
+    -AllowedPythonRoots $layout.RuntimeDir `
+    -RepairPidFile
 if ($watcher -and -not (Test-BlrMappingStatusFresh -Path $layout.MappingStatus -MaxAgeSeconds 300)) {
     Write-Host "Sentence-map watcher status is stale; restarting the owned watcher."
-    Stop-BlrOwnedProcess `
+    Stop-BlrOwnedWatcherProcess `
         -PidFile $layout.WatcherPid `
-        -InstallRoot $layout.Root `
-        -Label "stale sentence-map watcher" `
-        -ExpectedExecutable $layout.PythonExe `
-        -ExpectedCommandFragment "watch_translated.py"
+        -WatcherScript $watcherScript `
+        -StatusPath $layout.MappingStatus `
+        -AllowedPythonRoots $layout.RuntimeDir `
+        -Label "stale sentence-map watcher"
     $watcher = $null
 }
 if ($watcher) {
@@ -144,14 +146,11 @@ if ($watcher) {
 }
 else {
     Write-Host "Starting sentence-map watcher..."
-    if (Test-Path -LiteralPath $layout.MappingStatus) {
-        Remove-Item -LiteralPath $layout.MappingStatus -Force
-    }
     $watcherStartedAt = [DateTimeOffset]::UtcNow
     $watcherArguments = @(
         "-X",
         "utf8",
-        "watch_translated.py",
+        (ConvertTo-BlrArgument $watcherScript),
         "--translated-dir",
         (ConvertTo-BlrArgument $layout.TranslatedDir),
         "--cache-dir",
@@ -176,29 +175,40 @@ else {
     $watcherDeadline = (Get-Date).AddSeconds(15)
     do {
         Start-Sleep -Milliseconds 250
-        if ($watcherProcess.HasExited) {
-            $stderr = Join-Path $layout.LogDir "watcher.stderr.log"
-            $detail = if (Test-Path -LiteralPath $stderr) {
-                (Get-Content -LiteralPath $stderr -Tail 20 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
-            } else { "No watcher log was created." }
-            throw "Sentence-map watcher exited before becoming ready.`n$detail"
-        }
         if (
             Test-BlrMappingStatusFresh `
                 -Path $layout.MappingStatus `
                 -NotBefore $watcherStartedAt `
                 -MaxAgeSeconds 15
         ) {
-            break
+            $watcher = Get-BlrOwnedWatcherProcess `
+                -PidFile $layout.WatcherPid `
+                -WatcherScript $watcherScript `
+                -StatusPath $layout.MappingStatus `
+                -AllowedPythonRoots $layout.RuntimeDir `
+                -RepairPidFile
+            if ($watcher) {
+                break
+            }
         }
     } while ((Get-Date) -lt $watcherDeadline)
     if (
-        $watcherProcess.HasExited -or
+        -not $watcher -or
         -not (Test-BlrMappingStatusFresh -Path $layout.MappingStatus -NotBefore $watcherStartedAt -MaxAgeSeconds 15)
     ) {
-        throw "Sentence-map watcher did not create a fresh status file while staying alive. See $($layout.LogDir)."
+        Stop-BlrOwnedWatcherProcess `
+            -PidFile $layout.WatcherPid `
+            -WatcherScript $watcherScript `
+            -StatusPath $layout.MappingStatus `
+            -AllowedPythonRoots $layout.RuntimeDir `
+            -Label "failed sentence-map watcher"
+        $stderr = Join-Path $layout.LogDir "watcher.stderr.log"
+        $detail = if (Test-Path -LiteralPath $stderr) {
+            (Get-Content -LiteralPath $stderr -Tail 20 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+        } else { "No watcher log was created." }
+        throw "Sentence-map watcher did not create a fresh status owned by a live watcher within 15 seconds.`n$detail"
     }
-    Write-Host "Sentence-map watcher is ready (PID $($watcherProcess.Id))."
+    Write-Host "Sentence-map watcher is ready (PID $($watcher.ProcessId))."
 }
 
 Write-Host ""

@@ -60,11 +60,42 @@ def read_valid_map(path: Path, pdf: Path) -> dict | None:
     return payload
 
 
+def is_retryable_replace_error(error: OSError) -> bool:
+    """Return whether Windows may clear this file-sharing error shortly."""
+    return os.name == "nt" and (
+        isinstance(error, PermissionError)
+        or getattr(error, "winerror", None) in {5, 32}
+    )
+
+
 def atomic_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+
+        # On Windows, the HTTP server or Zotero can briefly have the current
+        # status file open without delete sharing. os.replace then raises
+        # WinError 5/32 even though the reader releases it milliseconds later.
+        # Keep the old complete JSON visible and retry the same atomic replace.
+        delays = (0.02, 0.05, 0.1, 0.2, 0.4, 0.8, 1.0, 1.0)
+        for attempt in range(len(delays) + 1):
+            try:
+                os.replace(temporary, path)
+                return
+            except OSError as error:
+                if not is_retryable_replace_error(error) or attempt == len(delays):
+                    raise
+                time.sleep(delays[attempt])
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 @dataclass
@@ -118,7 +149,17 @@ class SidecarWatcher:
 
     def write_status(self, **update: object) -> None:
         self.status.update(update, updatedAt=utc_now())
-        atomic_json(self.status_path, self.status)
+        try:
+            atomic_json(self.status_path, self.status)
+        except OSError as error:
+            if not is_retryable_replace_error(error):
+                raise
+            # A persistently held read handle should make status temporarily
+            # stale, not terminate mapping or orphan the launcher's PID file.
+            print(
+                f"Warning: status update deferred because the file is in use: {error}",
+                flush=True,
+            )
 
     def stable_candidates(self) -> list[Path]:
         now = time.monotonic()

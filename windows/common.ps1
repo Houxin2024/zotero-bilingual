@@ -166,6 +166,172 @@ function Stop-BlrOwnedProcess {
     }
 }
 
+function Test-BlrOwnedWatcherProcess {
+    param(
+        $Process,
+        [string]$WatcherScript,
+        [string]$StatusPath,
+        [string[]]$AllowedPythonRoots
+    )
+
+    if ($null -eq $Process -or [string]::IsNullOrWhiteSpace([string]$Process.CommandLine)) {
+        return $false
+    }
+    $executable = [string]$Process.ExecutablePath
+    if ([string]::IsNullOrWhiteSpace($executable)) {
+        return $false
+    }
+    $executableName = [System.IO.Path]::GetFileName($executable)
+    if ($executableName -notin @("python.exe", "pythonw.exe")) {
+        return $false
+    }
+    $executableFullPath = [System.IO.Path]::GetFullPath($executable)
+    $pythonIsOwned = $false
+    foreach ($allowedRoot in @($AllowedPythonRoots)) {
+        if ([string]::IsNullOrWhiteSpace($allowedRoot)) {
+            continue
+        }
+        $rootFullPath = [System.IO.Path]::GetFullPath($allowedRoot).TrimEnd("\")
+        if (
+            $executableFullPath.Equals($rootFullPath, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $executableFullPath.StartsWith($rootFullPath + "\", [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            $pythonIsOwned = $true
+            break
+        }
+    }
+    if (-not $pythonIsOwned) {
+        return $false
+    }
+
+    $watcherFullPath = [System.IO.Path]::GetFullPath($WatcherScript)
+    $statusFullPath = [System.IO.Path]::GetFullPath($StatusPath)
+    $commandLine = [string]$Process.CommandLine
+    $hasWatcher = (
+        $commandLine.IndexOf($watcherFullPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $commandLine.IndexOf(
+            [System.IO.Path]::GetFileName($watcherFullPath),
+            [System.StringComparison]::OrdinalIgnoreCase
+        ) -ge 0
+    )
+    return (
+        $hasWatcher -and
+        $commandLine.IndexOf($statusFullPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    )
+}
+
+function Get-BlrOwnedWatcherProcess {
+    param(
+        [string]$PidFile,
+        [string]$WatcherScript,
+        [string]$StatusPath,
+        [string[]]$AllowedPythonRoots,
+        [switch]$RepairPidFile
+    )
+
+    $candidateIds = @()
+    $status = Get-BlrMappingStatus -Path $StatusPath
+    if ($null -ne $status) {
+        $statusPid = 0
+        $statusPidValue = Get-BlrOptionalProperty -Object $status -Name "watcherPid" -Default ""
+        if ([int]::TryParse([string]$statusPidValue, [ref]$statusPid) -and $statusPid -gt 0) {
+            # The watcher writes os.getpid() into its status. This is the real
+            # interpreter PID even when a venv/uv launcher exits after spawn.
+            $candidateIds += $statusPid
+        }
+    }
+    if (Test-Path -LiteralPath $PidFile) {
+        $pidFilePid = 0
+        $raw = ([string](Get-Content -LiteralPath $PidFile -Raw -ErrorAction SilentlyContinue)).Trim()
+        if ([int]::TryParse($raw, [ref]$pidFilePid) -and $pidFilePid -gt 0) {
+            $candidateIds += $pidFilePid
+        }
+    }
+
+    $selected = $null
+    foreach ($candidateId in @($candidateIds | Select-Object -Unique)) {
+        $candidate = Get-CimInstance Win32_Process -Filter "ProcessId=$candidateId" -ErrorAction SilentlyContinue
+        if (
+            Test-BlrOwnedWatcherProcess `
+                -Process $candidate `
+                -WatcherScript $WatcherScript `
+                -StatusPath $StatusPath `
+                -AllowedPythonRoots $AllowedPythonRoots
+        ) {
+            $selected = $candidate
+            break
+        }
+    }
+    if ($selected -and $RepairPidFile) {
+        Set-Content -LiteralPath $PidFile -Value $selected.ProcessId -Encoding ASCII
+    }
+    return $selected
+}
+
+function Stop-BlrOwnedWatcherProcess {
+    param(
+        [string]$PidFile,
+        [string]$WatcherScript,
+        [string]$StatusPath,
+        [string[]]$AllowedPythonRoots,
+        [string]$Label = "sentence-map watcher"
+    )
+
+    $process = Get-BlrOwnedWatcherProcess `
+        -PidFile $PidFile `
+        -WatcherScript $WatcherScript `
+        -StatusPath $StatusPath `
+        -AllowedPythonRoots $AllowedPythonRoots
+    if ($process) {
+        # If the venv launcher is still waiting above the real interpreter,
+        # stop that exactly validated root so /T covers the complete tree.
+        $root = $process
+        $seen = @{}
+        while ([int]$root.ParentProcessId -gt 0 -and -not $seen.ContainsKey([int]$root.ParentProcessId)) {
+            $seen[[int]$root.ProcessId] = $true
+            $parent = Get-CimInstance `
+                Win32_Process `
+                -Filter "ProcessId=$([int]$root.ParentProcessId)" `
+                -ErrorAction SilentlyContinue
+            if (-not (Test-BlrOwnedWatcherProcess `
+                -Process $parent `
+                -WatcherScript $WatcherScript `
+                -StatusPath $StatusPath `
+                -AllowedPythonRoots $AllowedPythonRoots
+            )) {
+                break
+            }
+            $root = $parent
+        }
+
+        $rootId = [int]$root.ProcessId
+        $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
+        Write-Host "Stopping $Label (owned process tree rooted at PID $rootId)..."
+        & $taskkill /PID ([string]$rootId) /T /F | Out-Null
+        $taskkillExitCode = $LASTEXITCODE
+        try {
+            Wait-Process -Id $rootId -Timeout 15 -ErrorAction SilentlyContinue
+        }
+        catch {
+            # The process may already have exited.
+        }
+        if (Get-Process -Id $rootId -ErrorAction SilentlyContinue) {
+            throw "Failed to stop the owned $Label process tree (PID $rootId); taskkill exit code $taskkillExitCode."
+        }
+        $remaining = Get-BlrOwnedWatcherProcess `
+            -PidFile $PidFile `
+            -WatcherScript $WatcherScript `
+            -StatusPath $StatusPath `
+            -AllowedPythonRoots $AllowedPythonRoots
+        if ($remaining) {
+            throw "Failed to stop the owned $Label watcher (PID $($remaining.ProcessId)); taskkill exit code $taskkillExitCode."
+        }
+    }
+    if (Test-Path -LiteralPath $PidFile) {
+        Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function New-BlrDirectory {
     param([string]$Path)
     New-Item -ItemType Directory -Path $Path -Force | Out-Null

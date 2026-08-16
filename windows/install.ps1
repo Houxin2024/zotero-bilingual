@@ -294,6 +294,7 @@ $addonsDir = Join-Path $InstallRoot "addons"
 $licensesDir = Join-Path $InstallRoot "licenses"
 $installedPatchesDir = Join-Path $licensesDir "patches"
 $installedRequirements = Join-Path $configDir "requirements-win.txt"
+$hadExistingInstallation = Test-Path -LiteralPath (Join-Path $configDir "install.json")
 
 foreach ($directory in @(
     $InstallRoot, $binDir, $backendDir, $runtimeDir, $downloadDir,
@@ -303,12 +304,19 @@ foreach ($directory in @(
 }
 
 Write-Host "Installing Bilingual Linked Reader backend files..."
-Get-ChildItem -LiteralPath $BackendSource -File |
-    Where-Object { $_.Extension -eq ".py" -or $_.Name -eq "requirements.txt" } |
-    Copy-Item -Destination $backendDir -Force
 foreach ($scriptName in @("common.ps1", "start.ps1", "stop.ps1", "status.ps1")) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $scriptName) -Destination (Join-Path $binDir $scriptName) -Force
 }
+if ($hadExistingInstallation) {
+    $setupPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    Invoke-Checked -Label "Stopping the existing local backend before updating it..." -Command {
+        & $setupPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass `
+            -File (Join-Path $binDir "stop.ps1") -InstallRoot $InstallRoot
+    }
+}
+Get-ChildItem -LiteralPath $BackendSource -File |
+    Where-Object { $_.Extension -eq ".py" -or $_.Name -eq "requirements.txt" } |
+    Copy-Item -Destination $backendDir -Force
 Copy-Item -LiteralPath $NoticesSource -Destination (Join-Path $licensesDir "THIRD_PARTY_NOTICES.md") -Force
 Copy-Item -LiteralPath $LoopbackPatchSource -Destination (Join-Path $installedPatchesDir "zotero-pdf2zh-v4.0.3-loopback.patch") -Force
 Copy-Item -LiteralPath $WindowsRequirementsSource -Destination $installedRequirements -Force

@@ -86,54 +86,6 @@ function Find-PythonExecutable {
     throw "No native Windows Python was found. Run Install-Windows.cmd or pass -Python C:\path\to\python.exe."
 }
 
-function Stop-StartedProcessTree {
-    param([Parameter(Mandatory = $true)][int]$ProcessId)
-
-    # A Windows venv python.exe can be a redirector which owns the real base
-    # Python as a child process. Kill the known process tree on failed startup
-    # so that child cannot survive as an untracked watcher.
-    $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
-    if (Test-Path -LiteralPath $taskkill -PathType Leaf) {
-        & $taskkill /PID ([string]$ProcessId) /T /F 2>$null | Out-Null
-        return
-    }
-    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
-}
-
-function Get-OwnedWatcher {
-    param(
-        [string]$WatcherPath,
-        [string]$InstancePath,
-        [string]$WatcherPidFile
-    )
-
-    if (Test-Path -LiteralPath $WatcherPidFile) {
-        $raw = ([string](Get-Content -LiteralPath $WatcherPidFile -Raw -ErrorAction SilentlyContinue)).Trim()
-        $processId = 0
-        if ([int]::TryParse($raw, [ref]$processId)) {
-            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
-            if ($process -and $process.CommandLine -and
-                $process.CommandLine.IndexOf($WatcherPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-                $process.CommandLine.IndexOf($InstancePath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                return $process
-            }
-        }
-        Remove-Item -LiteralPath $WatcherPidFile -Force -ErrorAction SilentlyContinue
-    }
-
-    $existing = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.CommandLine -and
-            $_.CommandLine.IndexOf($WatcherPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-            $_.CommandLine.IndexOf($InstancePath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-        } |
-        Select-Object -First 1
-    if ($existing) {
-        Set-Content -LiteralPath $WatcherPidFile -Value $existing.ProcessId -Encoding ASCII
-    }
-    return $existing
-}
-
 if ($env:OS -ne "Windows_NT") {
     throw "This launcher is for native Windows. Run watch_translated.py directly on macOS or Linux."
 }
@@ -146,6 +98,11 @@ $watcher = Join-Path $ProjectRoot "backend\watch_translated.py"
 if (-not (Test-Path -LiteralPath $watcher -PathType Leaf)) {
     throw "Sentence-map watcher not found: $watcher"
 }
+$common = Join-Path $ProjectRoot "windows\common.ps1"
+if (-not (Test-Path -LiteralPath $common -PathType Leaf)) {
+    throw "Windows lifecycle helpers not found: $common"
+}
+. $common
 
 if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     $InstallRoot = if (-not [string]::IsNullOrWhiteSpace($env:BLR_INSTALL_ROOT)) {
@@ -189,6 +146,16 @@ else {
 $LogDir = Resolve-FullPath -Path $LogDir -BasePath $InstallRoot
 $PidFile = Resolve-FullPath -Path $PidFile -BasePath $InstallRoot
 $Python = Find-PythonExecutable -Requested $Python -Root $InstallRoot -Project $ProjectRoot
+$pythonOwnershipRoots = @([System.IO.Path]::GetDirectoryName($Python))
+$venvRoot = Split-Path -Parent (Split-Path -Parent $Python)
+$venvConfig = Join-Path $venvRoot "pyvenv.cfg"
+if (Test-Path -LiteralPath $venvConfig -PathType Leaf) {
+    $venvConfigText = Get-Content -LiteralPath $venvConfig -Raw -Encoding UTF8
+    $homeMatch = [regex]::Match($venvConfigText, '(?m)^home\s*=\s*(?<home>.+?)\s*$')
+    if ($homeMatch.Success) {
+        $pythonOwnershipRoots += $homeMatch.Groups['home'].Value.Trim()
+    }
+}
 
 foreach ($directory in @(
     $TranslatedDir,
@@ -200,10 +167,12 @@ foreach ($directory in @(
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 
-$existing = Get-OwnedWatcher `
-    -WatcherPath $watcher `
-    -InstancePath $StatusPath `
-    -WatcherPidFile $PidFile
+$existing = Get-BlrOwnedWatcherProcess `
+    -PidFile $PidFile `
+    -WatcherScript $watcher `
+    -StatusPath $StatusPath `
+    -AllowedPythonRoots $pythonOwnershipRoots `
+    -RepairPidFile
 if ($existing) {
     Write-Host "Sentence-map watcher is already running (PID $($existing.ProcessId))."
     if ($PassThru) {
@@ -245,27 +214,26 @@ $process = Start-Process `
 Set-Content -LiteralPath $PidFile -Value $process.Id -Encoding ASCII
 
 $ready = $false
+$ownedWatcher = $null
 $deadline = (Get-Date).AddSeconds($WaitSeconds)
 do {
     Start-Sleep -Milliseconds 250
     $process.Refresh()
-    if ($process.HasExited) {
-        $detail = if (Test-Path -LiteralPath $stderr) {
-            (Get-Content -LiteralPath $stderr -Tail 20 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
-        }
-        else {
-            "No error log was created."
-        }
-        Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
-        throw "Sentence-map watcher exited before becoming ready.`n$detail"
-    }
     if (Test-Path -LiteralPath $StatusPath) {
         $statusItem = Get-Item -LiteralPath $StatusPath
         $isFresh = $null -eq $previousStatusWrite -or $statusItem.LastWriteTimeUtc -gt $previousStatusWrite
         if ($isFresh) {
             try {
                 $status = Get-Content -LiteralPath $StatusPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                $ready = -not [string]::IsNullOrWhiteSpace([string]$status.startedAt)
+                if (-not [string]::IsNullOrWhiteSpace([string]$status.startedAt)) {
+                    $ownedWatcher = Get-BlrOwnedWatcherProcess `
+                        -PidFile $PidFile `
+                        -WatcherScript $watcher `
+                        -StatusPath $StatusPath `
+                        -AllowedPythonRoots $pythonOwnershipRoots `
+                        -RepairPidFile
+                    $ready = $null -ne $ownedWatcher
+                }
             }
             catch {
                 $ready = $false
@@ -275,14 +243,24 @@ do {
 } while (-not $ready -and (Get-Date) -lt $deadline)
 
 if (-not $ready) {
-    Stop-StartedProcessTree -ProcessId $process.Id
-    Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
-    throw "Sentence-map watcher did not publish a fresh status within $WaitSeconds seconds. See $stderr."
+    Stop-BlrOwnedWatcherProcess `
+        -PidFile $PidFile `
+        -WatcherScript $watcher `
+        -StatusPath $StatusPath `
+        -AllowedPythonRoots $pythonOwnershipRoots `
+        -Label "failed sentence-map watcher"
+    $detail = if (Test-Path -LiteralPath $stderr) {
+        (Get-Content -LiteralPath $stderr -Tail 20 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+    }
+    else {
+        "No error log was created."
+    }
+    throw "Sentence-map watcher did not publish a fresh status owned by a live watcher within $WaitSeconds seconds.`n$detail"
 }
 
-Write-Host "Sentence-map watcher is ready (PID $($process.Id))."
+Write-Host "Sentence-map watcher is ready (PID $($ownedWatcher.ProcessId))."
 Write-Host "Translated PDFs: $TranslatedDir"
 Write-Host "Status: $StatusPath"
 if ($PassThru) {
-    $process
+    $ownedWatcher
 }

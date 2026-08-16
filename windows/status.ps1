@@ -20,11 +20,13 @@ $serverListenerOwned = if ($server) {
 } else {
     $false
 }
-$watcher = Get-BlrProcessFromPidFile `
+$watcherScript = Join-Path $layout.BackendDir "watch_translated.py"
+$watcher = Get-BlrOwnedWatcherProcess `
     -PidFile $layout.WatcherPid `
-    -InstallRoot $layout.Root `
-    -ExpectedExecutable $layout.PythonExe `
-    -ExpectedCommandFragment "watch_translated.py"
+    -WatcherScript $watcherScript `
+    -StatusPath $layout.MappingStatus `
+    -AllowedPythonRoots $layout.RuntimeDir `
+    -RepairPidFile
 $watcherStatusFresh = Test-BlrMappingStatusFresh -Path $layout.MappingStatus -MaxAgeSeconds 300
 
 Write-Host "Install root: $($layout.Root)"

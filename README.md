@@ -33,9 +33,9 @@
 
 ## Windows 一键安装（推荐）
 
-[下载 Windows 一键安装包 v0.9.1](https://github.com/Houxin2024/zotero-bilingual-linked-reader/raw/refs/heads/main/dist/bilingual-linked-reader-0.9.1-windows.zip)
+[下载 Windows 一键安装包 v0.9.2](https://github.com/Houxin2024/zotero-bilingual-linked-reader/raw/refs/heads/main/dist/bilingual-linked-reader-0.9.2-windows.zip)
 
-1. 下载 `bilingual-linked-reader-0.9.1-windows.zip` 并完整解压。
+1. 下载 `bilingual-linked-reader-0.9.2-windows.zip` 并完整解压。
 2. 双击 `Install-Windows.cmd`；不需要管理员权限、WSL 或预先安装 Python。
 3. 安装程序会打开一个文件夹。在 Zotero 里分别安装其中的两个 XPI，然后重启 Zotero。
 4. 在 PDF2zh 设置中选择翻译服务并配置它所需的 API Key（如果有）。
@@ -71,7 +71,7 @@ Zotero 不允许普通脚本无提示安装扩展，因此两次 XPI 确认和�
 
 ## 仅安装 XPI（已有后端时）
 
-1. [下载 Bilingual Linked Reader v0.9.1 XPI](https://github.com/Houxin2024/zotero-bilingual-linked-reader/raw/refs/heads/main/dist/bilingual-linked-reader-0.9.1.xpi)。
+1. [下载 Bilingual Linked Reader v0.9.2 XPI](https://github.com/Houxin2024/zotero-bilingual-linked-reader/raw/refs/heads/main/dist/bilingual-linked-reader-0.9.2.xpi)。
 2. Zotero → `工具` → `插件` → 右上角齿轮 → `Install Add-on From File...`。
 3. 选择 XPI 并重启 Zotero。
 
