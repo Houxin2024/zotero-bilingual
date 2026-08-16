@@ -607,9 +607,16 @@ var BilingualSync = {
         return statusFile === basename ? status : null;
     },
 
-    showMappingProgress(win, status) {
+    showMappingProgress(win, status, pdfPath = "") {
         if (!win?.document?.body) return;
         const document = win.document;
+        const attachment = String(
+            pdfPath
+            || status?.currentFile
+            || status?.completedFile
+            || status?.attachment
+            || "",
+        ).replace(/^.*[\\/]/, "");
         let node = document.getElementById("codex-bilingual-map-progress");
         if (!node) {
             node = document.createElement("div");
@@ -654,6 +661,7 @@ var BilingualSync = {
             document.body.appendChild(node);
             this.progressWindows.add(win);
         }
+        node.dataset.attachment = attachment;
         const progress = Math.max(0, Math.min(100, Number(status?.mappingProgress) || 0));
         const ready = progress >= 100;
         node.querySelector(".codex-map-title").textContent = ready
@@ -665,18 +673,28 @@ var BilingualSync = {
             : "linear-gradient(90deg,#667eea,#7c3aed)";
         node.querySelector(".codex-map-detail").textContent = status?.mappingDetail || (ready ? "现在可以单击任一侧句子联动。" : "PDF 已生成，正在建立中英文坐标关系。 ");
         if (ready) {
-            win.setTimeout(() => this.hideMappingProgress(win), 3000);
+            win.setTimeout(() => this.hideMappingProgress(win, attachment), 3000);
         }
     },
 
-    hideMappingProgress(win) {
+    hideMappingProgress(win, pdfPath = "") {
         try {
-            win?.document?.getElementById("codex-bilingual-map-progress")?.remove();
+            const node = win?.document?.getElementById("codex-bilingual-map-progress");
+            const attachment = String(pdfPath || "").replace(/^.*[\\/]/, "");
+            if (
+                attachment
+                && node?.dataset?.attachment
+                && node.dataset.attachment !== attachment
+            ) {
+                return false;
+            }
+            node?.remove();
         }
         catch (error) {
             // The reader window may already be closing.
         }
         this.progressWindows.delete(win);
+        return true;
     },
 
     async loadMap(pdfPath, forceRefresh = false) {
@@ -765,14 +783,15 @@ var BilingualSync = {
                 attachment: pdfPath.replace(/^.*[\\/]/, ""),
                 retryInMilliseconds: delay,
             });
-            this.showMappingProgress(
-                win,
-                await this.readMappingStatus(pdfPath) || {
-                    mappingProgress: 0,
-                    mappingStage: "等待后台启动",
-                    mappingDetail: "翻译已完成，句子映射任务即将开始。",
-                },
-            );
+            const mappingStatus = await this.readMappingStatus(pdfPath);
+            if (mappingStatus) {
+                this.showMappingProgress(win, mappingStatus, pdfPath);
+            }
+            else {
+                // Do not fabricate an indefinite 0% card. A stale reader tab
+                // can keep retrying after another PDF is already ready.
+                this.hideMappingProgress(win, pdfPath);
+            }
             return;
         }
         this.mapRetry.delete(reader);
@@ -789,7 +808,7 @@ var BilingualSync = {
                     mappingProgress: 100,
                     mappingStage: "句子映射已就绪",
                     mappingDetail: "现在可以单击任一侧句子联动。",
-                });
+                }, pdfPath);
                 this.readyReaders.add(reader);
                 this.readyReaderWindows.set(reader, win);
                 await this.runSingleClickSmokeTest(win, map);
