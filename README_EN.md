@@ -25,17 +25,19 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip"><strong>⬇️ Download the Windows installer v0.9.3</strong></a>
+  <a href="https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.4/bilingual-linked-reader-0.9.4-windows.zip"><strong>⬇️ Download the Windows installer v0.9.4</strong></a>
   · <a href="docs/windows-one-click.md">Advanced setup guide (Chinese)</a>
   · <a href="https://github.com/Houxin2024/zotero-bilingual/issues">Report an issue</a>
 </p>
 
 ## Get started in four steps
 
-1. [Download the Windows package](https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3-windows.zip) and extract the ZIP completely.
+1. [Download the Windows package](https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.4/bilingual-linked-reader-0.9.4-windows.zip) and extract the ZIP completely.
 2. Double-click `Install-Windows.cmd` and wait for the green completion message.
 3. In Zotero, open `Tools → Add-ons → gear icon → Install Add-on From File...`, install both XPI files from the automatically opened `addons` folder, then restart Zotero.
 4. Right-click a paper and choose `PDF2zh → Translate`.
+
+When upgrading, reinstall both XPI files as well. The local PDF2zh `4.0.3.3` revision contains the new translation card and progress fix.
 
 > [!TIP]
 > New installations use **SiliconFlow Free** by default, with no account or API key required. It is an online third-party service and may be rate-limited. Use your own API or a local service for sensitive papers.
@@ -43,6 +45,8 @@
 The first setup downloads a private Python runtime, PDF2zh Next, and the local sentence-alignment model. Allow a few minutes. After setup, the backend starts automatically at Windows sign-in.
 
 After setup, select a paper or PDF attachment in Zotero and choose `PDF2zh → Translate` from the context menu. The bilingual PDF is attached and opened automatically, with sentence-mapping progress in the lower-right corner; once mapping is ready, click any sentence to highlight its counterpart.
+
+Translation status appears in a dismissible card inside the Zotero window. It shows stable processing stages instead of treating each nested stage as whole-document 100%. Closing the card does not stop the background task, and the card never stays above other applications.
 
 ## Privacy
 
@@ -93,7 +97,7 @@ Regular Windows users do not need these instructions.
 
 - [Windows setup and troubleshooting (Chinese)](docs/windows-one-click.md)
 - [PDF2zh Server and sentence-map watcher integration](docs/pdf2zh-integration.md)
-- [Download only the Zotero Bilingual PDF Reader v0.9.3 XPI](https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.3/bilingual-linked-reader-0.9.3.xpi)
+- [Download only the Zotero Bilingual PDF Reader v0.9.4 XPI](https://github.com/Houxin2024/zotero-bilingual/releases/download/v0.9.4/bilingual-linked-reader-0.9.4.xpi)
 
 ```bash
 # Build the XPI

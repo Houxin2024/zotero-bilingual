@@ -8,7 +8,7 @@ async function startup({ rootURI, resourceURI, version }) {
     await Zotero.initializationPromise;
     rootURI = rootURI || resourceURI.spec;
     syncContext = { Zotero, Services, Components, rootURI };
-    Services.scriptloader.loadSubScript(rootURI + "sync.js?v=" + (version || "0.9.3"), syncContext);
+    Services.scriptloader.loadSubScript(rootURI + "sync.js?v=" + (version || "0.9.4"), syncContext);
     await syncContext.BilingualSync.start();
 }
 

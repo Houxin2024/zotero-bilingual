@@ -8,9 +8,13 @@
 2. 双击根目录的 `Install-Windows.cmd`。
 3. 等待安装器校验包内固定版本的官方 PDF2zh Server 与 uv，并下载 `pdf2zh-next`、BabelDOC 和 Python 3.12 私有运行环境。
 4. 安装结束后会打开 `addons` 文件夹。在 Zotero 中打开“工具 → 插件”，分别安装文件夹中的：
-   - `zotero-pdf2zh-*.xpi`
+   - `zotero-pdf2zh-4.0.3.3-blr.xpi`
    - `bilingual-linked-reader-*.xpi`
 5. 重启 Zotero。之后右键论文 PDF，选择 PDF2zh 翻译即可。新安装默认使用 SiliconFlow Free，不需要 API Key。
+
+翻译状态卡只显示在 Zotero 主窗口内，可随时单击 `×` 隐藏；隐藏提示不会中断后台任务，切换到其他应用时也不会继续置顶。
+
+升级用户也必须重新安装这两个 XPI。即使已经安装官方 PDF2zh 4.0.3，也请安装包内的 `4.0.3.3` 本地修订版；进度修复和新状态卡包含在其中。
 
 默认安装目录为：
 
@@ -18,7 +22,7 @@
 %LOCALAPPDATA%\ZoteroBilingualLinkedReader
 ```
 
-安装器只写入当前用户目录。首次安装和首次生成句对时需要下载较大的 Python 依赖、字体及语义模型，建议预留至少 3 GB 磁盘空间。
+安装器只写入当前用户目录。首次安装和首次生成句对时需要联网下载 Python 依赖、字体及语义模型。
 
 ## 日常使用
 

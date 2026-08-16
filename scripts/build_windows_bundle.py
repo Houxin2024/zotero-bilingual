@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import io
+import importlib.util
 import json
 import os
+import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -75,7 +78,10 @@ def validate_sources() -> None:
         WINDOWS / "patches" / "zotero-pdf2zh-v4.0.3-loopback.patch",
         WINDOWS / "payload" / "zotero-pdf2zh-server-4.0.3.zip",
         WINDOWS / "payload" / "zotero-pdf2zh-4.0.3.xpi",
+        WINDOWS / "payload" / "zotero-pdf2zh-4.0.3.3-blr.xpi",
         WINDOWS / "payload" / "uv-0.12.5-windows-x64.zip",
+        ROOT / "scripts" / "patch_pdf2zh_addon_ui.py",
+        ROOT / "scripts" / "patch_pdf2zh_progress_server.py",
         WINDOWS / "licenses" / "ZOTERO-PDF2ZH-AGPL-3.0.txt",
         WINDOWS / "licenses" / "PDFMATHTRANSLATE-NEXT-AGPL-3.0.txt",
         WINDOWS / "licenses" / "BABELDOC-AGPL-3.0.txt",
@@ -95,6 +101,24 @@ def validate_sources() -> None:
     if missing:
         raise SystemExit("Windows bundle inputs are missing: " + ", ".join(missing))
 
+    patch_script = ROOT / "scripts" / "patch_pdf2zh_addon_ui.py"
+    spec = importlib.util.spec_from_file_location("blr_pdf2zh_addon_patch", patch_script)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"Could not load PDF2zh add-on patcher: {patch_script}")
+    patcher = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = patcher
+    spec.loader.exec_module(patcher)
+    upstream = WINDOWS / "payload" / "zotero-pdf2zh-4.0.3.xpi"
+    tracked = WINDOWS / "payload" / "zotero-pdf2zh-4.0.3.3-blr.xpi"
+    with tempfile.TemporaryDirectory(prefix="blr-pdf2zh-addon-") as folder:
+        rebuilt = Path(folder) / tracked.name
+        patcher.build_patched_xpi(upstream, rebuilt)
+        if rebuilt.read_bytes() != tracked.read_bytes():
+            raise SystemExit(
+                "windows/payload/zotero-pdf2zh-4.0.3.3-blr.xpi is not the "
+                "deterministic output of scripts/patch_pdf2zh_addon_ui.py"
+            )
+
 
 def build_bundle(output: Path) -> Path:
     validate_sources()
@@ -106,6 +130,9 @@ def build_bundle(output: Path) -> Path:
         "addonId": addon_manifest["applications"]["zotero"]["id"],
         "platform": "windows-x86_64",
         "installer": "Install-Windows.cmd",
+        "pdf2zhAddonFile": "windows/payload/zotero-pdf2zh-4.0.3.3-blr.xpi",
+        "pdf2zhAddonPatch": "scripts/patch_pdf2zh_addon_ui.py",
+        "pdf2zhServerProgressPatch": "scripts/patch_pdf2zh_progress_server.py",
     }
 
     output = output.resolve()
@@ -131,6 +158,17 @@ def build_bundle(output: Path) -> Path:
                 (json.dumps(bundle_manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
             )
             write_bytes(archive, f"addons/{addon_name}", addon_bytes)
+
+            for patch_script in (
+                ROOT / "scripts" / "patch_pdf2zh_addon_ui.py",
+                ROOT / "scripts" / "patch_pdf2zh_progress_server.py",
+            ):
+                write_bytes(
+                    archive,
+                    patch_script.relative_to(ROOT).as_posix(),
+                    patch_script.read_bytes(),
+                    executable=True,
+                )
 
             for folder in (WINDOWS, BACKEND, INTEGRATION):
                 for path in iter_payload_files(folder):

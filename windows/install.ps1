@@ -14,10 +14,12 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
 $Pdf2zhVersion = "4.0.3"
+$Pdf2zhAddonVersion = "4.0.3.3"
 $Pdf2zhServerUrl = "https://github.com/guaguastandup/zotero-pdf2zh/releases/download/v4.0.3/server.zip"
 $Pdf2zhServerSha256 = "9a125fb1a4d16029d297bc3691b02282670c60cd91db098e45e029691e407b69"
 $Pdf2zhAddonUrl = "https://github.com/guaguastandup/zotero-pdf2zh/releases/download/v4.0.3/zotero-pdf-2-zh.xpi"
-$Pdf2zhAddonSha256 = "31a7d73f67096dcfd1640012cad391a8898da78aef62782b91bb9b9f153cd8fc"
+$Pdf2zhAddonUpstreamSha256 = "31a7d73f67096dcfd1640012cad391a8898da78aef62782b91bb9b9f153cd8fc"
+$Pdf2zhAddonPatchedSha256 = "46f99b795271558168e6f1110c8a7045f607dfdc6db6b2b08d820331fc87c096"
 $UvVersion = "0.12.5"
 $UvArchiveUrl = "https://github.com/astral-sh/uv/releases/download/0.12.5/uv-x86_64-pc-windows-msvc.zip"
 $UvArchiveSha256 = "4c4d49d8738847d9b71ba319e49a5688c93eac0fe6204b1df24e98528dddf39a"
@@ -48,11 +50,14 @@ $SourceRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $BackendSource = Join-Path $SourceRoot "backend"
 $WindowsRequirementsSource = Join-Path $PSScriptRoot "requirements-win.txt"
 $LoopbackPatchSource = Join-Path $PSScriptRoot "patches\zotero-pdf2zh-v4.0.3-loopback.patch"
+$AddonUiPatchSource = Join-Path $SourceRoot "scripts\patch_pdf2zh_addon_ui.py"
+$ServerProgressPatchSource = Join-Path $SourceRoot "scripts\patch_pdf2zh_progress_server.py"
 $NoticesSource = Join-Path $PSScriptRoot "THIRD_PARTY_NOTICES.md"
 $BundledPayloadDir = Join-Path $PSScriptRoot "payload"
 $BundledLicensesDir = Join-Path $PSScriptRoot "licenses"
 $BundledServerArchive = Join-Path $BundledPayloadDir "zotero-pdf2zh-server-$Pdf2zhVersion.zip"
-$BundledPdf2zhAddon = Join-Path $BundledPayloadDir "zotero-pdf2zh-$Pdf2zhVersion.xpi"
+$BundledUpstreamPdf2zhAddon = Join-Path $BundledPayloadDir "zotero-pdf2zh-$Pdf2zhVersion.xpi"
+$BundledPdf2zhAddon = Join-Path $BundledPayloadDir "zotero-pdf2zh-$Pdf2zhAddonVersion-blr.xpi"
 $BundledUvArchive = Join-Path $BundledPayloadDir "uv-$UvVersion-windows-x64.zip"
 $BundledPdf2zhLicense = Join-Path $BundledLicensesDir "ZOTERO-PDF2ZH-AGPL-3.0.txt"
 $BundledPdf2zhNextLicense = Join-Path $BundledLicensesDir "PDFMATHTRANSLATE-NEXT-AGPL-3.0.txt"
@@ -95,9 +100,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $BackendSource "watch_translated.py"
 foreach ($requiredBundleFile in @(
     $WindowsRequirementsSource,
     $LoopbackPatchSource,
+    $AddonUiPatchSource,
+    $ServerProgressPatchSource,
     $NoticesSource,
     $OurAddonSource,
     $BundledServerArchive,
+    $BundledUpstreamPdf2zhAddon,
     $BundledPdf2zhAddon,
     $BundledUvArchive,
     $BundledPdf2zhLicense,
@@ -107,6 +115,14 @@ foreach ($requiredBundleFile in @(
     if (-not (Test-Path -LiteralPath $requiredBundleFile)) {
         throw "The Windows bundle is incomplete: $requiredBundleFile is missing."
     }
+}
+$bundledUpstreamAddonHash = (Get-FileHash -LiteralPath $BundledUpstreamPdf2zhAddon -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($bundledUpstreamAddonHash -ne $Pdf2zhAddonUpstreamSha256) {
+    throw "The bundled official PDF2zh add-on has an unexpected SHA-256: $bundledUpstreamAddonHash"
+}
+$bundledPatchedAddonHash = (Get-FileHash -LiteralPath $BundledPdf2zhAddon -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($bundledPatchedAddonHash -ne $Pdf2zhAddonPatchedSha256) {
+    throw "The bundled patched PDF2zh add-on has an unexpected SHA-256: $bundledPatchedAddonHash"
 }
 
 Write-Host "Zotero Bilingual PDF Reader - Windows setup $BundleVersion" -ForegroundColor Cyan
@@ -319,6 +335,10 @@ Get-ChildItem -LiteralPath $BackendSource -File |
     Copy-Item -Destination $backendDir -Force
 Copy-Item -LiteralPath $NoticesSource -Destination (Join-Path $licensesDir "THIRD_PARTY_NOTICES.md") -Force
 Copy-Item -LiteralPath $LoopbackPatchSource -Destination (Join-Path $installedPatchesDir "zotero-pdf2zh-v4.0.3-loopback.patch") -Force
+$installedAddonUiPatch = Join-Path $installedPatchesDir "patch_pdf2zh_addon_ui.py"
+Copy-Item -LiteralPath $AddonUiPatchSource -Destination $installedAddonUiPatch -Force
+$installedProgressPatch = Join-Path $installedPatchesDir "patch_pdf2zh_progress_server.py"
+Copy-Item -LiteralPath $ServerProgressPatchSource -Destination $installedProgressPatch -Force
 Copy-Item -LiteralPath $WindowsRequirementsSource -Destination $installedRequirements -Force
 Copy-Item -LiteralPath $BundledPdf2zhLicense -Destination (Join-Path $licensesDir "ZOTERO-PDF2ZH-AGPL-3.0.txt") -Force
 Copy-Item -LiteralPath $BundledPdf2zhNextLicense -Destination (Join-Path $licensesDir "PDFMATHTRANSLATE-NEXT-AGPL-3.0.txt") -Force
@@ -351,14 +371,20 @@ if (-not (Test-Path -LiteralPath (Join-Path $serverDir "server.py"))) {
 New-Directory -Path (Join-Path $serverDir "translated")
 Set-Pdf2zhLoopbackOnly -ServerScript (Join-Path $serverDir "server.py")
 
-$upstreamAddon = Join-Path $addonsDir "zotero-pdf2zh-$Pdf2zhVersion.xpi"
+$upstreamAddon = Join-Path $addonsDir "zotero-pdf2zh-$Pdf2zhAddonVersion-blr.xpi"
+Get-ChildItem -LiteralPath $addonsDir -Filter "zotero-pdf2zh-*.xpi" -File -ErrorAction SilentlyContinue |
+    Where-Object { -not $_.FullName.Equals($upstreamAddon, [System.StringComparison]::OrdinalIgnoreCase) } |
+    Remove-Item -Force
 Invoke-Download `
     -Url $Pdf2zhAddonUrl `
     -Destination $upstreamAddon `
-    -ExpectedSha256 $Pdf2zhAddonSha256 `
+    -ExpectedSha256 $Pdf2zhAddonPatchedSha256 `
     -BundledSource $BundledPdf2zhAddon
 
 $ourAddon = Join-Path $addonsDir "bilingual-linked-reader-$BundleVersion.xpi"
+Get-ChildItem -LiteralPath $addonsDir -Filter "bilingual-linked-reader-*.xpi" -File -ErrorAction SilentlyContinue |
+    Where-Object { -not $_.FullName.Equals($ourAddon, [System.StringComparison]::OrdinalIgnoreCase) } |
+    Remove-Item -Force
 Copy-Item -LiteralPath $OurAddonSource -Destination $ourAddon -Force
 
 if (-not (Test-Path -LiteralPath $uvExe)) {
@@ -443,6 +469,9 @@ Invoke-Checked -Label "Installing pinned translation and sentence-mapping depend
 Invoke-Checked -Label "Checking the private Python environment..." -Command {
     & $pythonExe -m pip check
 }
+Invoke-Checked -Label "Applying the PDF2zh progress-state fix..." -Command {
+    & $pythonExe $installedProgressPatch $serverDir
+}
 
 $modelCacheDir = Join-Path $InstallRoot "model-cache"
 New-Directory -Path $modelCacheDir
@@ -520,6 +549,8 @@ $installConfig = [ordered]@{
     port = $Port
     serverURL = "http://127.0.0.1:$Port"
     pdf2zhVersion = $Pdf2zhVersion
+    pdf2zhAddonVersion = $Pdf2zhAddonVersion
+    pdf2zhProgressPatchVersion = 1
     pdf2zhNextRequirement = $Pdf2zhNextRequirement
     uvVersion = $UvVersion
     alignmentModel = $AlignmentModel
@@ -618,7 +649,7 @@ if (-not $NoStart) {
 Write-Host ""
 Write-Host "Windows setup completed successfully." -ForegroundColor Green
 Write-Host "1. In Zotero, open Tools -> Add-ons."
-Write-Host "2. Install these two files once:"
+Write-Host "2. Install or update both files below (including the PDF2zh 4.0.3.3 local revision):"
 Write-Host "   $upstreamAddon"
 Write-Host "   $ourAddon"
 Write-Host "3. Restart Zotero, then right-click a PDF -> PDF2zh -> Translate."
